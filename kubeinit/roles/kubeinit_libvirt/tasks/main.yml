@@ -60,25 +60,39 @@
   vars:
     host: "{{ kubeinit_deployment_node_name }}"
 
+- name: Install CentOS based pre-dependencies
+  ansible.builtin.package:
+    name: "{{ kubeinit_libvirt_openvswitch_predependencies.centos }}"
+    state: present
+  when: (hostvars[kubeinit_deployment_node_name].distribution_family == 'CentOS')
+  register: installed_prepackages_centos
+
 - name: Install CentOS based requirements
   ansible.builtin.package:
-    name: "{{ kubeinit_libvirt_hypervisor_dependencies.centos }}"
+    name: "{{ kubeinit_libvirt_hypervisor_dependencies.centos + kubeinit_libvirt_openvswitch_dependencies.centos }}"
     state: present
-  when: (hostvars[kubeinit_deployment_node_name].ansible_distribution == 'CentOS' or hostvars[kubeinit_deployment_node_name].ansible_distribution == 'RedHat' or hostvars[kubeinit_deployment_node_name].ansible_distribution == 'Fedora')
+  when: (hostvars[kubeinit_deployment_node_name].distribution_family == 'CentOS')
   register: installed_packages_centos
+
+- name: Install Fedora based requirements
+  ansible.builtin.package:
+    name: "{{ kubeinit_libvirt_hypervisor_dependencies.centos + kubeinit_libvirt_openvswitch_dependencies.fedora }}"
+    state: present
+  when: (hostvars[kubeinit_deployment_node_name].distribution_family == 'Fedora')
+  register: installed_packages_fedora
 
 - name: Disable Services (firewalld)
   ansible.builtin.service:
     name: "firewalld"
     state: stopped
     enabled: no
-  when: (hostvars[kubeinit_deployment_node_name].ansible_distribution == 'CentOS' or hostvars[kubeinit_deployment_node_name].ansible_distribution == 'RedHat' or hostvars[kubeinit_deployment_node_name].ansible_distribution == 'Fedora')
+  when: (hostvars[kubeinit_deployment_node_name].distribution_family == 'CentOS' or hostvars[kubeinit_deployment_node_name].distribution_family == 'Fedora')
 
 - name: Install Debian based requirements
   ansible.builtin.package:
-    name: "{{ kubeinit_libvirt_hypervisor_dependencies.debian }}"
+    name: "{{ kubeinit_libvirt_hypervisor_dependencies.debian + kubeinit_libvirt_openvswitch_dependencies.debian }}"
     state: present
-  when: (hostvars[kubeinit_deployment_node_name].ansible_distribution == 'Debian' or hostvars[kubeinit_deployment_node_name].ansible_distribution == 'Ubuntu')
+  when: ( hostvars[kubeinit_deployment_node_name].distribution_family == 'Debian')
   register: installed_packages_debian
 
 - name: Upgrade all packages
@@ -131,6 +145,11 @@
   ansible.builtin.set_fact:
     nested_virtualization_module_name: "kvm_amd"
   when: amd_processor.rc == 0
+
+- name: Clear intel and amd processor facts
+  ansible.builtin.set_fact:
+    intel_processor: null
+    amd_processor: null
 
 - name: Set fact for nested virtualization test path
   ansible.builtin.set_fact:
@@ -192,42 +211,11 @@
     enabled: yes
     state: started
 
-- name: Set qemu user depending on the operative system
-  ansible.builtin.set_fact:
-    kubeinit_qemu_user: "{{ 'qemu' if (hostvars[kubeinit_deployment_node_name].ansible_distribution == 'CentOS' or hostvars[kubeinit_deployment_node_name].ansible_distribution == 'RedHat' or hostvars[kubeinit_deployment_node_name].ansible_distribution == 'Fedora') else 'libvirt-qemu' }}"
-
-- name: Download Ubuntu cloud image
-  ansible.builtin.get_url:
-    validate_certs: False
-    use_proxy: True
-    url: "{{ kubeinit_libvirt_source_images.ubuntu.uri }}{{ kubeinit_libvirt_source_images.ubuntu.image }}"
-    dest: "{{ kubeinit_libvirt_target_image_dir }}/{{ kubeinit_libvirt_source_images.ubuntu.image }}"
-    force: no
-    mode: '0666'
-    owner: "{{ kubeinit_qemu_user }}"
-  when: "'ubuntu' in hostvars[groups['service_nodes'][0]].os"
-
-- name: Download Debian cloud image
-  ansible.builtin.get_url:
-    validate_certs: False
-    use_proxy: True
-    url: "{{ kubeinit_libvirt_source_images.debian.uri }}{{ kubeinit_libvirt_source_images.debian.image }}"
-    dest: "{{ kubeinit_libvirt_target_image_dir }}/{{ kubeinit_libvirt_source_images.debian.image }}"
-    force: no
-    mode: '0666'
-    owner: "{{ kubeinit_qemu_user }}"
-  when: "'debian' in hostvars[groups['service_nodes'][0]].os"
-
-- name: Download CentOS cloud image
-  ansible.builtin.get_url:
-    validate_certs: False
-    use_proxy: True
-    url: "{{ kubeinit_libvirt_source_images.centos.uri }}{{ kubeinit_libvirt_source_images.centos.image }}"
-    dest: "{{ kubeinit_libvirt_target_image_dir }}/{{ kubeinit_libvirt_source_images.centos.image }}"
-    force: no
-    mode: '0666'
-    owner: "{{ kubeinit_qemu_user }}"
-  when: "'centos' in hostvars[groups['service_nodes'][0]].os"
+- name: Enable and start openvswitch
+  ansible.builtin.service:
+    name: "{{ kubeinit_libvirt_openvswitch_services.debian if (hostvars[kubeinit_deployment_node_name].distribution_family == 'Debian') else kubeinit_libvirt_openvswitch_services.centos }}"
+    enabled: yes
+    state: started
 
 - name: "Make sure we have a '{{ kubeinit_libvirt_cloud_user }}' group"
   ansible.builtin.group:

@@ -15,6 +15,17 @@
 # under the License.
 
 
+- name: Delegate to the service node target
+  block:
+
+    - name: Setup the provision container
+      ansible.builtin.include_role:
+        name: ../../roles/kubeinit_services
+        tasks_from: 10_create_provision_container.yml
+        public: true
+
+  delegate_to: "{{ hostvars[kubeinit_deployment_node_name].target }}"
+
 - name: Delegate to the service node
   block:
 
@@ -78,6 +89,10 @@
     - name: Set up variable with images list
       ansible.builtin.set_fact:
         kubeinit_registry_images: "{{ (load_images.content | b64decode).split('\n') | select() | list }}"
+
+    - name: Print kubeinit_cluster_hostvars
+      debug:
+        var: kubeinit_cluster_hostvars
 
     - name: Mirror OKD remote registry to local
       ansible.builtin.shell: |

@@ -60,14 +60,14 @@
     kubeinit_ovn_central_host: "{{ groups['all_ovn_hosts'][0] }}"
     kubeinit_services_node: "{{ groups['all_service_nodes'][0] }}"
     kubeinit_first_controller_node: "{{ groups['all_control_plane_nodes'][0] }}"
-    kubeinit_controller_count: "{{ groups['all_control_plane_nodes'] | length  }}"
+    kubeinit_controller_count: "{{ groups['all_control_plane_nodes'] | length }}"
     kubeinit_compute_count: "{{ groups['all_compute_nodes'] | length }}"
 
 - name: Define additional host, node and services facts
   ansible.builtin.set_fact:
+    kubeinit_cluster_hostvars: "{{ hostvars[kubeinit_cluster_name] }}"
     kubeinit_bastion_host_address: "{{ hostvars[kubeinit_bastion_host].ansible_default_ipv4_address }}"
     kubeinit_bastion_host_name: "{{ hostvars[kubeinit_bastion_host].ansible_host }}"
-    kubeinit_ovn_central_host_address: "{{ hostvars[kubeinit_ovn_central_host].ansible_default_ipv4_address }}"
     kubeinit_apache_service_address: "{{ hostvars[kubeinit_services_node].ansible_host }}"
     kubeinit_bind_service_address: "{{ hostvars[kubeinit_services_node].ansible_host }}"
     kubeinit_haproxy_service_address: "{{ hostvars[kubeinit_services_node].ansible_host }}"
@@ -76,29 +76,30 @@
     kubeinit_nfs_service_address: "{{ hostvars[kubeinit_services_node].ansible_host }}"
     kubeinit_registry_service_hostname: "{{ hostvars[kubeinit_services_node].inventory_hostname }}"
     kubeinit_registry_service_address: "{{ hostvars[kubeinit_services_node].ansible_host }}"
-    kubeinit_services_provision_address: "{{ hostvars[kubeinit_services_node].ansible_host }}"
-    kubeinit_haproxy_service_manager: "{{ hostvars[kubeinit_services_node].ansible_host }}"
+    kubeinit_services_node_address: "{{ hostvars[kubeinit_services_node].ansible_host }}"
+    kubeinit_services_node_target: "{{ hostvars[kubeinit_services_node].target }}"
     kubeinit_service_user: "root"
     kubeinit_service_user_dir: "/root"
     kubeinit_ingress_hostname: "ingress"
-    kubeinit_cluster_hostvars: "{{ hostvars[kubeinit_cluster_name] }}"
-
-- name: Find prepare_localhost tasks
-  ansible.builtin.set_fact:
-    prepare_localhost_role: "{{ lookup('first_found', params) | relpath('kubeinit/x/y') | dirname | dirname }}"
-  vars:
-    params:
-      files:
-        - "tasks/prepare_localhost.yml"
-      paths:
-        - "../../roles/kubeinit_{{ kubeinit_inventory_cluster_distro }}"
-        - "../../roles/kubeinit_prepare"
 
 - name: Prepare localhost
   ansible.builtin.include_role:
-    name: "{{ prepare_localhost_role | default('../../roles/kubeinit_prepare') }}"
-    tasks_from: "prepare_localhost.yml"
+    name: "../../roles/kubeinit_prepare"
+    tasks_from: prepare_localhost.yml
     public: true
+  when: true
+
+- name: Download images for libvirt services guests
+  ansible.builtin.include_role:
+    name: "../../roles/kubeinit_libvirt"
+    tasks_from: "download_images.yml"
+    public: true
+  with_items:
+    - "{{ groups['all_hosts'] | list }}"
+  loop_control:
+    loop_var: cluster_role_item
+  vars:
+    kubeinit_deployment_node_name: "{{ cluster_role_item }}"
 
 - name: Cleanup nodes for libvirt guests from previous install
   ansible.builtin.include_role:

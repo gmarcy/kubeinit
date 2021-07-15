@@ -15,42 +15,6 @@
 # under the License.
 
 
-- name: Remove any previous services folders
-  ansible.builtin.file:
-    path: /var/kubeinit
-    state: absent
-
-- name: Create services folders
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    recurse: yes
-    mode: '0700'
-  with_items:
-    - "{{ kubeinit_services_directory }}/.ssh"
-    - "/var/kubeinit/html"
-
-- name: Get the public key we will use to access the service pod
-  become: false
-  delegate_to: localhost
-  ansible.builtin.command: cat ~/.ssh/id_rsa.pub
-  register: kubeinit_services_public_key
-  changed_when: "kubeinit_services_public_key.rc == 0"
-
-- name: Set the fact for the service pod public key
-  ansible.builtin.set_fact:
-    services_public_key: "{{ kubeinit_services_public_key.stdout }}"
-
-- name: Create authorized_keys for service pod
-  ansible.builtin.copy:
-    content: |
-      {{ services_public_key }}
-      {{ kubeinit_provision_vms_public_key }}
-    dest: "{{ kubeinit_services_directory }}/.ssh/authorized_keys"
-    owner: "{{ kubeinit_service_user }}"
-    group: "{{ kubeinit_service_user }}"
-    mode: '0600'
-
 - name: Install buildah if required
   ansible.builtin.package:
     state: present
@@ -161,3 +125,87 @@
   retries: 30
   delay: 10
   until: "'connected' in cmd_boot_ok_res.stdout"
+  delegate_to: "{{ kubeinit_bastion_host_address }}"
+
+- name: Delegate to kubeinit_deployment_node_name
+  block:
+
+    - name: Wait for connection to {{ kubeinit_deployment_node_name }}
+      ansible.builtin.wait_for_connection:
+        connect_timeout: 20
+        sleep: 5
+        delay: 5
+        timeout: 300
+
+    - name: Copy kubeinit provisioner secrets into provisioner container
+      ansible.builtin.copy:
+        src: /var/kubeinit/provision/.ssh/
+        dest: /root/.ssh/
+        remote_src: true
+        mode: preserve
+
+    - name: Create registry auth pullsecret file
+      ansible.builtin.copy:
+        content: "{{ kubeinit_registry_pullsecret }}"
+        dest: "{{ kubeinit_service_user_dir }}/{{ kubeinit_registry_auth_file }}"
+        group: "{{ kubeinit_service_user }}"
+        owner: "{{ kubeinit_service_user }}"
+        mode: '0644'
+        force: yes
+
+    - name: Copy trustbundle into services container
+      ansible.builtin.copy:
+        content: "{{ trustbundle }}"
+        dest: "{{ kubeinit_service_user_dir }}/domain.crt"
+        group: "{{ kubeinit_service_user }}"
+        owner: "{{ kubeinit_service_user }}"
+        mode: '0644'
+        force: yes
+
+    - name: Copy cert to pki directory
+      ansible.builtin.copy:
+        content: "{{ trustbundle }}"
+        dest: /etc/pki/ca-trust/source/anchors/domain.crt
+        remote_src: yes
+        group: "{{ kubeinit_service_user }}"
+        owner: "{{ kubeinit_service_user }}"
+        mode: 0644
+        force: yes
+        backup: yes
+      when: hostvars[kubeinit_deployment_node_name].os == 'centos'
+
+    - name: Copy cert to pki directory
+      ansible.builtin.copy:
+        content: "{{ trustbundle }}"
+        dest: /usr/local/share/ca-certificates/domain.crt
+        remote_src: yes
+        group: "{{ kubeinit_service_user }}"
+        owner: "{{ kubeinit_service_user }}"
+        mode: 0644
+        force: yes
+        backup: yes
+      when: hostvars[kubeinit_deployment_node_name].os == 'ubuntu' or hostvars[kubeinit_deployment_node_name].os == 'debian'
+
+    - name: Install all certs in ubuntu
+      ansible.builtin.shell: |
+        set -e
+        mkdir -p /usr/local/share/ca-certificates/kubeinit/
+        openssl x509 -inform PEM -in {{ kubeinit_registry_directory_cert }}/domainCA.crt > {{ kubeinit_registry_directory_cert }}/domainCA.pem
+        cp {{ kubeinit_registry_directory_cert }}/* /usr/local/share/ca-certificates/kubeinit/
+      register: install_all_certs
+      changed_when: "install_all_certs.rc == 0"
+      when: hostvars[kubeinit_deployment_node_name].os == 'ubuntu' or hostvars[kubeinit_deployment_node_name].os == 'debian'
+
+    - name: Update the CA trust files
+      ansible.builtin.command: update-ca-trust extract
+      register: update_ca_trust_files
+      changed_when: "update_ca_trust_files.rc == 0"
+      when: hostvars[kubeinit_deployment_node_name].os == 'centos'
+
+    - name: Update the CA trust files
+      ansible.builtin.command: update-ca-certificates
+      register: update_ca_certs
+      changed_when: "update_ca_certs.rc == 0"
+      when: hostvars[kubeinit_deployment_node_name].os == 'ubuntu' or hostvars[kubeinit_deployment_node_name].os == 'debian'
+
+  delegate_to: "{{ hostvars[kubeinit_deployment_node_name].ansible_host }}"

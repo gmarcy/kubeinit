@@ -96,7 +96,9 @@
         set -o pipefail
         ssh-keygen -R  {{ item }} || true
         ssh-keygen -R  {{ item }}.{{ kubeinit_inventory_cluster_name }}.{{ kubeinit_inventory_cluster_domain }} || true
+        {% if (hostvars[item].ansible_host is defined) %}
         ssh-keygen -R  {{ hostvars[item].ansible_host }} || true
+        {% endif %}
       with_items: "{{ groups['all_guest_vms'] }}"
       when: known_hosts_file.stat.exists | bool
       args:
@@ -110,5 +112,6 @@
         state: absent
         regexp: '{{ hostvars[item].ansible_host }}'
       with_items: "{{ groups['all_guest_vms'] }}"
+      when: hostvars[item].ansible_host is defined
 
   delegate_to: "{{ hostvars[kubeinit_deployment_node_name].ansible_host }}"

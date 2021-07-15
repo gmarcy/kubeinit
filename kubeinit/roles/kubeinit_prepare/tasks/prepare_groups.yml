@@ -104,16 +104,35 @@
   with_items:
     - "{{ groups['hypervisor_hosts'] | list | default([]) }}"
 
-- name: Add all service and cluster nodes to the all_guest_vms group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    group: all_guest_vms
-  with_items:
-    - "{{ groups['all_service_nodes'] + groups['all_cluster_nodes'] }}"
-
-- name: Add all OVN hosts to the all_ovn_hosts group
+- name: Add all hosts to the all_ovn_hosts group
   ansible.builtin.add_host:
     name: "{{ item }}"
     group: all_ovn_hosts
   with_items:
     - "{{ groups['all_hosts'] }}"
+
+- name: Add services guest cloned from first service node
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_inventory_cluster_distro }}-services"
+    group: all_ovn_hosts
+    ansible_host: "{{ kubeinit_inventory_cluster_distro }}-services"
+    target: "{{ hostvars[groups['all_service_nodes'][0]].target }}"
+    os: "{{ hostvars[groups['all_service_nodes'][0]].os }}"
+    disk: "{{ hostvars[groups['all_service_nodes'][0]].disk }}"
+    ram: "{{ hostvars[groups['all_service_nodes'][0]].ram }}"
+    vcpus: "{{ hostvars[groups['all_service_nodes'][0]].vcpus }}"
+    maxvcpus: "{{ hostvars[groups['all_service_nodes'][0]].maxvcpus }}"
+    prefix: "{{ hostvars[groups['all_service_nodes'][0]].prefix }}"
+    root_device: "{{ hostvars[groups['all_service_nodes'][0]].root_device }}"
+
+- name: Set services guest as target of first service node
+  ansible.builtin.add_host:
+    name: "{{ groups['all_service_nodes'][0] }}"
+    target: "{{ kubeinit_inventory_cluster_distro }}-services"
+
+- name: Add services guest and cluster nodes to the all_guest_vms group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    group: all_guest_vms
+  with_items:
+    - "{{ [ hostvars[groups['all_service_nodes'][0]].target ] + groups['all_cluster_nodes'] }}"

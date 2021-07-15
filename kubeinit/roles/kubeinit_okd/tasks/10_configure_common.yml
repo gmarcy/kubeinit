@@ -34,4 +34,10 @@
         state: present
         use_backend: dnf
 
+    - name: Prepare openshift pullsecret
+      ansible.builtin.include_role:
+        name: ../../roles/kubeinit_okd
+        tasks_from: prepare_pullsecret.yml
+        public: true
+
   delegate_to: "{{ hostvars[kubeinit_deployment_node_name].ansible_host }}"

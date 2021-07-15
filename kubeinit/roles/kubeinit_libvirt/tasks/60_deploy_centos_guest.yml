@@ -21,6 +21,7 @@
         src: "../../roles/kubeinit_libvirt/templates/ifcfg-eth0.j2"
         dest: "{{ kubeinit_libvirt_hypervisor_tmp_dir }}/{{ kubeinit_deployment_node_name }}/ifcfg-eth0"
         mode: "0644"
+      when: not 'network' in kubeinit_deployment_role
 
     - name: Create the hosts template
       ansible.builtin.template:
@@ -58,7 +59,9 @@
           --ssh-inject root:file:/root/.ssh/authorized_keys \
           --run-command "echo {{ kubeinit_provision_vms_public_key }} >> /root/.ssh/authorized_keys" \
           --hostname {{ kubeinit_deployment_node_name }}.{{ kubeinit_inventory_cluster_name }}.{{ kubeinit_inventory_cluster_domain }} \
-          --copy-in {{ kubeinit_libvirt_hypervisor_tmp_dir }}/{{ kubeinit_deployment_node_name }}/ifcfg-eth0:/etc/sysconfig/network-scripts \
+          {% if 'network' not in kubeinit_deployment_role %} \
+            --copy-in {{ kubeinit_libvirt_hypervisor_tmp_dir }}/{{ kubeinit_deployment_node_name }}/ifcfg-eth0:/etc/sysconfig/network-scripts \
+          {% endif %} \
           --copy-in {{ kubeinit_libvirt_hypervisor_tmp_dir }}/{{ kubeinit_deployment_node_name }}/hosts.redhat.tmpl:/etc/cloud/templates \
           --copy-in {{ kubeinit_libvirt_hypervisor_tmp_dir }}/{{ kubeinit_deployment_node_name }}/cloud.cfg:/etc/cloud \
           --selinux-relabel --root-password password:{{ kubeinit_libvirt_vms_default_password }}
@@ -76,8 +79,11 @@
             --os-type=linux \
             --os-variant=rhel8.0 \
             --autostart \
+            {% if 'network' in kubeinit_deployment_role %}
+              --network network=default,model=virtio \
+            {% endif %}
             {% for net in kubeinit_libvirt_cluster_nets %}
-              {% if net.enabled %}
+              {% if 'network' not in kubeinit_deployment_role and net.enabled %}
                 --network network={{ net.name }}{% if net.main %},mac={{ hostvars[kubeinit_deployment_node_name].mac }},virtualport.parameters.interfaceid={{ hostvars[kubeinit_deployment_node_name].interfaceid }}{% endif %},target.dev=veth0-{{ kubeinit_inventory_cluster_distro }}{{ kubeinit_deployment_node_name.split("-")[1][:3] }}{{ kubeinit_deployment_node_name.split("-")[2] }},model=virtio \
               {% endif %}
             {% endfor %}
@@ -97,6 +103,54 @@
       delay: 10
       until: kubeinit_deployment_node_name in running_vms.list_vms
 
+    - name: Additional processing for network role
+      block:
+
+        - name: Get the mac address assigned to the VM interface
+          ansible.builtin.shell: |
+            set -eo pipefail
+            virsh domiflist {{ kubeinit_deployment_node_name }} | awk '$2=="network" {print $NF}'
+          args:
+            executable: /bin/bash
+          register: service_vm_mac_addr
+          changed_when: "service_vm_mac_addr.rc == 0"
+
+        - name: Wait for the IP address to appear in libvirt DHCP leases
+          ansible.builtin.shell: |
+            set -eo pipefail
+            virsh net-dhcp-leases default --mac {{ service_vm_mac_addr.stdout }} | awk '$4=="ipv4" {print $5}'
+          args:
+            executable: /bin/bash
+          register: service_vm_ip_addr
+          changed_when: "service_vm_ip_addr.rc == 0"
+          retries: 5
+          delay: 10
+          until: service_vm_ip_addr.stdout_lines | list | count > 0
+
+        - name: Add ansible facts to hostvars
+          ansible.builtin.add_host:
+            name: "{{ kubeinit_deployment_node_name }}"
+            ansible_host: "{{ service_vm_ip_addr.stdout.split('/')[0] }}"
+            ansible_ssh_common_args: >-
+              {{ ansible_ssh_common_args }} -o ProxyCommand="ssh -W %h:%p -q root@{{ kubeinit_bastion_host_name }}"
+
+        - name: Put the IP address of network services guest into a file
+          ansible.builtin.copy:
+            content: "{{ hostvars[kubeinit_deployment_node_name].ansible_host }}"
+            dest: "/root/{{ kubeinit_deployment_node_name }}-address"
+            owner: "{{ kubeinit_service_user }}"
+            group: "{{ kubeinit_service_user }}"
+            mode: '0644'
+            force: yes
+
+        - name: Add ssh ProxyCommand option for network services guest
+          ansible.builtin.add_host:
+            name: "{{ hostvars[kubeinit_deployment_node_name].ansible_host }}"
+            ansible_ssh_common_args: >-
+              {{ ansible_ssh_common_args }} -o ProxyCommand="ssh -W %h:%p -q root@{{ kubeinit_bastion_host_name }}"
+
+      when: "'network' in kubeinit_deployment_role"
+
   delegate_to: "{{ hostvars[kubeinit_deployment_node_name].target }}"
 
 - name: Check cluster nodes are up and running
@@ -104,6 +158,30 @@
     name: "../../roles/kubeinit_libvirt"
     tasks_from: 70_check_nodes_up.yml
     public: yes
+
+- name: Additional tasks for network role
+  block:
+
+    - name: Gather network and host facts for network services guest
+      ansible.builtin.include_role:
+        name: "../../roles/kubeinit_prepare"
+        tasks_from: gather_host_facts.yml
+        public: yes
+      vars:
+        kubeinit_deployment_node_host: "{{ hostvars[kubeinit_deployment_node_name].ansible_host }}"
+
+    - name: Install iptables
+      ansible.builtin.package:
+        name: "iptables"
+        state: present
+      register: installed_iptables_packages
+      retries: 5
+      delay: 10
+      until: installed_iptables_packages.rc == 0
+      changed_when: "installed_iptables_packages.rc == 0"
+      delegate_to: "{{ hostvars[kubeinit_deployment_node_name].ansible_host }}"
+
+  when: "'network' in kubeinit_deployment_role"
 
 - name: Configure common requirements in guests
   block:

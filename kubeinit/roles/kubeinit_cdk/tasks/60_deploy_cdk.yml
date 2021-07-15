@@ -30,9 +30,9 @@
 
     - name: "Install the CDK juju installer"
       ansible.builtin.shell: |
-        ssh-keyscan {{ kubeinit_services_provision_address }}
+        ssh-keyscan {{ kubeinit_services_node_address }}
         sleep 2
-        ssh-keyscan {{ kubeinit_services_provision_address }} >> ~/.ssh/known_hosts
+        ssh-keyscan {{ kubeinit_services_node_address }} >> ~/.ssh/known_hosts
         cd
         cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
         # Make sure the private key has the correct perms
@@ -47,7 +47,7 @@
         juju bootstrap --no-gui \
             --debug \
             --bootstrap-series=focal \
-            manual/root@{{ kubeinit_services_provision_address }} > juju-bootstrap.log 2>&1
+            manual/root@{{ kubeinit_services_node_address }} > juju-bootstrap.log 2>&1
       register: bootstrap_cdk
       changed_when: "bootstrap_cdk.rc == 0"
 
