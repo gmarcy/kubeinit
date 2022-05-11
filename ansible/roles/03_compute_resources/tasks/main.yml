@@ -1,0 +1,52 @@
+---
+
+#
+# This is the setup for a libvirt network that can PXE boot virtual machines
+#
+
+- name: Install libvirt
+  shell: |
+    dnf update -y
+    dnf install -y libvirt
+  become: true
+  become_user: root
+
+- name: Create tftp folder
+  shell: |
+    mkdir -p /var/lib/tftpboot
+    chmod a+r /var/lib/tftpboot
+    chown -R nobody: /var/lib/tftpboot
+    chcon -R --reference /usr/sbin/dnsmasq /var/lib/tftpboot
+    chcon -R --reference /usr/libexec/libvirt_leaseshelper /var/lib/tftpboot
+    virsh net-destroy default
+    virsh net-edit default
+    virsh net-start default
+  become: true
+  become_user: root
+
+- name: Boot the virtual machines
+  shell: |
+    virt-install --pxe --network network=default --memory 2048 --vcpus 2 --disk 10
+  become: true
+  become_user: root
+
+- name: Setup
+  shell: |
+    dnf makecache
+    dnf update -y
+    dnf upgrade -y
+    dnf install -y wget
+    dnf install -y http://packages.oit.ncsu.edu/centos/8-stream/nfv/x86_64/openvswitch-2/Packages/o/openvswitch-selinux-extra-policy-1.0-28.el8.noarch.rpm
+    dnf install -y http://packages.oit.ncsu.edu/centos/8-stream/nfv/x86_64/openvswitch-2/Packages/o/openvswitch2.13-2.13.0-153.el8s.x86_64.rpm
+    systemctl enable --now openvswitch
+    systemctl status openvswitch
+    ovs-vsctl show
+    dnf install -y python39 python39-pip
+    python3 -m pip install --upgrade pip setuptools
+    python3 -m pip list
+    dnf install -y @virt libvirt virt-install virt-manager xauth xterm firefox net-tools
+    dnf install -y  libvirt qemu-kvm virt-install libguestfs-tools
+    systemctl enable --now libvirtd
+    systemctl status libvirtd
+  become: true
+  become_user: root

@@ -1,0 +1,10 @@
+<network>
+  <name>kthw-net</name>
+  <bridge name='kthwbr0'/>
+  <forward/>
+  <ip address='10.240.0.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='10.240.0.2' end='10.240.0.254'/>
+    </dhcp>
+  </ip>
+</network>

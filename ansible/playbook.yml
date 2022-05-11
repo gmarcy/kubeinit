@@ -1,0 +1,20 @@
+---
+
+- name: Install Kubernetes The Hard Way
+  hosts: localhost
+  roles:
+    - 01_prerequisites
+    - 02_client_tools
+    - 03_compute_resources
+    - 04_certificate_authority
+    - 05_kubernetes_configuration_files
+    - 06_data_encryption_keys
+    - 07_bootstrapping_etcd
+    - 08_bootstrapping_kubernetes_controllers
+    - 09_bootstrapping_kubernetes_workers
+    - 10_configuring_kubectl
+    - 11_pod_network_routes
+    - 12_dns_addon
+    - 13_smoke_test
+    - 14_cleanup
+    - 15_persistent_storage

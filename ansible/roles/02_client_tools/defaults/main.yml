@@ -1,0 +1,10 @@
+---
+
+cfssl_macos_url: https://storage.googleapis.com/kubernetes-the-hard-way/cfssl/1.4.1/darwin/cfssl
+cfssljson_macos_url: https://storage.googleapis.com/kubernetes-the-hard-way/cfssl/1.4.1/darwin/cfssljson
+
+cfssl_linux_url: https://github.com/cloudflare/cfssl/releases/download/v1.6.1/cfssl_1.6.1_linux_amd64
+cfssljson_linux_url: https://github.com/cloudflare/cfssl/releases/download/v1.6.1/cfssljson_1.6.1_linux_amd64
+
+kubectl_macos_url: https://storage.googleapis.com/kubernetes-release/release/v1.2.0/bin/darwin/amd64/kubectl
+kubectl_linux_url: https://storage.googleapis.com/kubernetes-release/release/v1.23.4/bin/linux/amd64/kubectl

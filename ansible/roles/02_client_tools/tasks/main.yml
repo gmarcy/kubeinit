@@ -1,0 +1,49 @@
+---
+
+- name: Install CFSSL
+  block:
+
+    - name: OS X
+      shell: |
+        curl -o cfssl {{ cfssl_macos_url }}
+        curl -o cfssljson {{ cfssljson_macos_url }}
+        chmod +x cfssl cfssljson
+        mv cfssl cfssljson /usr/local/bin/
+      when: ansible_distribution == 'MacOSX'
+
+    - name: Linux
+      shell: |
+        wget -q --show-progress --https-only --timestamping \
+          {{ cfssl_linux_url }} \
+          {{ cfssljson_linux_url }}
+        mv cfssl_*_linux_amd64 cfssl
+        mv cfssljson_*_linux_amd64 cfssljson
+        chmod +x cfssl cfssljson
+        mv cfssl cfssljson /usr/local/bin/
+      when: ansible_distribution != 'MacOSX'
+
+- name: Verification
+  shell: |
+    cfssl version
+    cfssljson --version
+
+- name: Install kubectl
+  block:
+
+    - name: OS X
+      shell: |
+        curl -o kubectl {{ kubectl_macos_url }}
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+      when: ansible_distribution == 'MacOSX'
+
+    - name: Linux
+      shell: |
+        wget -q --https-only {{ kubectl_linux_url }}
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+      when: ansible_distribution != 'MacOSX'
+
+- name: Verification
+  shell: |
+    kubectl version --client
