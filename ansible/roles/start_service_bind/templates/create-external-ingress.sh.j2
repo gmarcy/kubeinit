@@ -1,0 +1,120 @@
+#!/bin/bash
+set -euo pipefail
+
+. /etc/os-release
+
+# This file is rendered using a template from a KubeInit role
+# This file will be overriden each time the playbook runs
+# No not edit directly
+# More information at: https://github.com/kubeinit/kubeinit
+
+KUBEINIT_INGRESS_IP=$(ip route get "8.8.8.8" | grep -Po '(?<=(src )).*(?= uid)')
+KUBEINIT_HAPROXY_IP={{ kubeinit_haproxy_service_address }}
+
+# Install buildah and podman
+if [ "$ID" == "centos" -o "$ID" == "fedora" ]; then
+  dnf install -y buildah podman
+else
+  apt update
+  apt-get -y install --reinstall crun podman buildah
+fi
+
+# Build a container for external ingress and populate local directory with
+# configuration assets from the docker hub container image
+rm -rf /var/kubeinit/bind
+mkdir -p /var/kubeinit/bind
+if [ "$(buildah ls --filter 'name={{ kubeinit_cluster_name }}-external' --format {% raw %}'{{ .ContainerName }}'{% endraw %})" != "" ]; then buildah rm {{ kubeinit_cluster_name }}-external; fi
+buildah from --name {{ kubeinit_cluster_name }}-external -v /var/kubeinit/bind:/var/kubeinit/bind:Z quay.io/kubeinit/bind9:9.18
+buildah run {{ kubeinit_cluster_name }}-external -- apt-get update -y
+buildah run {{ kubeinit_cluster_name }}-external -- apt-get install -y openssh-client
+buildah run {{ kubeinit_cluster_name }}-external -- cp -pr /etc/bind/. /var/kubeinit/bind/.
+buildah config --label kubeinit-cluster-name={{ kubeinit_cluster_name }} {{ kubeinit_cluster_name }}-external
+buildah commit {{ kubeinit_cluster_name }}-external kubeinit/{{ kubeinit_cluster_name }}-ingress-bind
+buildah rm {{ kubeinit_cluster_name }}-external
+
+# Remove default-zones include from named.conf
+sed -i -e '/include "\/etc\/bind\/named.conf.default-zones\";/d' /var/kubeinit/bind/named.conf
+
+# Modify named.conf.options to only listen on the ingress IP address and only on ipv4 network
+sed -i -e '/options {/a\\tlisten-on port 53 { '${KUBEINIT_INGRESS_IP}'; };' -e '/listen-on-v6/s/any/none/' /var/kubeinit/bind/named.conf.options
+
+# Add an external view for our zone to named.conf.local
+cat >> /var/kubeinit/bind/named.conf.local << EOF
+
+view "external" {
+    match-clients { any; };
+    allow-query { any; };
+
+    zone "{{ kubeinit_cluster_fqdn }}" {
+        type master;
+        file "/etc/bind/db.{{ kubeinit_cluster_fqdn }}";
+    };
+
+};
+EOF
+
+# Create db file for our zone database
+cat > "/var/kubeinit/bind/db.{{ kubeinit_cluster_fqdn }}" << EOF
+\$TTL    604800
+
+; This file is rendered using a template from a KubeInit role
+; This file will be overriden each time the playbook runs
+; No not edit directly
+; More information at: https://github.com/kubeinit/kubeinit
+
+@       IN      SOA     {{ kubeinit_ingress_hostname }}.{{ kubeinit_cluster_fqdn }}. admin.{{ kubeinit_cluster_fqdn }}.(
+                  1     ; Serial
+             604800     ; Refresh
+              86400     ; Retry
+            2419200     ; Expire
+             604800     ; Negative Cache TTL
+)
+
+; name servers - NS records
+    IN      NS      {{ kubeinit_ingress_hostname }}.{{ kubeinit_cluster_fqdn }}.
+
+; external access IP - A records
+{{ kubeinit_ingress_hostname }}.{{ kubeinit_cluster_fqdn }}.                          IN      A       ${KUBEINIT_INGRESS_IP}
+registry.{{ kubeinit_cluster_fqdn }}.                         IN      A       ${KUBEINIT_INGRESS_IP}
+api.{{ kubeinit_cluster_fqdn }}.                              IN      A       ${KUBEINIT_INGRESS_IP}
+api-int.{{ kubeinit_cluster_fqdn }}.                          IN      A       ${KUBEINIT_INGRESS_IP}
+*.apps.{{ kubeinit_cluster_fqdn }}.                           IN      A       ${KUBEINIT_INGRESS_IP}
+console-openshift-console.apps.{{ kubeinit_cluster_fqdn }}.   IN      A       ${KUBEINIT_INGRESS_IP}
+oauth-openshift.apps.{{ kubeinit_cluster_fqdn }}.             IN      A       ${KUBEINIT_INGRESS_IP}
+EOF
+
+# Tear down any remants from previous executions of this script
+if podman container exists {{ kubeinit_cluster_name }}-ingress-bind; then podman stop {{ kubeinit_cluster_name }}-ingress-bind; fi
+
+# Create a volume to provide a cache for the bind server
+if [ "$(podman volume ls --filter 'name={{ kubeinit_cluster_name }}-bind-cache' --format {% raw %}'{{ .Name }}'{% endraw %})" != "" ]; then podman volume rm {{ kubeinit_cluster_name }}-bind-cache; fi
+podman volume create {{ kubeinit_cluster_name }}-bind-cache
+podman run --rm --name {{ kubeinit_cluster_name }}-set-bind-cache-owner -v {{ kubeinit_cluster_name }}-bind-cache:/var/cache/bind:Z kubeinit/{{ kubeinit_cluster_name }}-ingress-bind chown bind:bind /var/cache/bind
+
+# Create a pod for our container with dns nameserver and search options
+# If you would also like to add a container running VNC you can add this option to the end of the command on the next line: -p ${KUBEINIT_INGRESS_IP}:5901:5901
+if podman pod exists {{ kubeinit_cluster_name }}-ingress-pod; then podman pod rm {{ kubeinit_cluster_name }}-ingress-pod; fi
+podman pod create --name {{ kubeinit_cluster_name }}-ingress-pod --dns ${KUBEINIT_INGRESS_IP} --dns 8.8.8.8 --dns-search {{ kubeinit_cluster_fqdn }}
+
+# Use overlay for .ssh folder when available
+if [ "$ID" == "centos" -o "$ID" == "fedora" ]; then
+  overlay=O
+else
+  overlay=ro
+fi
+
+# Run the ingress container on the host network mounting required volumes
+podman run --rm -d --pod {{ kubeinit_cluster_name }}-ingress-pod --name {{ kubeinit_cluster_name }}-ingress-bind --network host -v /root/.ssh:/root/.ssh:${overlay} -v /var/kubeinit/bind:/etc/bind:Z -v {{ kubeinit_cluster_name }}-bind-cache:/var/cache/bind:Z kubeinit/{{ kubeinit_cluster_name }}-ingress-bind
+
+# Create ssh tunnels in the running container for all the ports served by the cluster haproxy service
+podman exec {{ kubeinit_cluster_name }}-ingress-bind ssh -i ~/.ssh/{{ kubeinit_cluster_name }}_id_{{ kubeinit_ssh_keytype }} -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=accept-new -N -f -L ${KUBEINIT_INGRESS_IP}:80:${KUBEINIT_HAPROXY_IP}:80 -L ${KUBEINIT_INGRESS_IP}:443:${KUBEINIT_HAPROXY_IP}:443 -L ${KUBEINIT_INGRESS_IP}:6443:${KUBEINIT_HAPROXY_IP}:6443 -L ${KUBEINIT_INGRESS_IP}:8443:${KUBEINIT_HAPROXY_IP}:8443 -L ${KUBEINIT_INGRESS_IP}:9000:${KUBEINIT_HAPROXY_IP}:9000 -L ${KUBEINIT_INGRESS_IP}:22623:${KUBEINIT_HAPROXY_IP}:22623 root@${KUBEINIT_HAPROXY_IP}
+
+# Open firewall ports for external access
+if systemctl is-active firewalld; then
+  firewall-cmd --permanent --add-service http --add-service https --add-service dns
+  firewall-cmd --permanent --add-port 6443/tcp --add-port 8443/tcp --add-port 9000/tcp --add-port 22623/tcp
+  firewall-cmd --reload
+  podman network reload --all
+fi
+
+# Anything else you would like to add

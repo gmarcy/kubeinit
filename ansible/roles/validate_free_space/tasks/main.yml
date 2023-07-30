@@ -1,0 +1,107 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+#
+# Make sure the mount path of libvirt has enough space in the hypervisor
+#
+- name: Get libvirt hypervisors directory free space
+  ansible.builtin.shell: |
+    set -o pipefail
+    if [ -d "{{ kubeinit_validations_libvirt_path }}" ]
+    then
+        file_space={{ kubeinit_validations_libvirt_path }}
+    else
+        file_space={{ kubeinit_validations_libvirt_path_fallback }}
+    fi
+    df -BG ${file_space} | \
+        jq -R -s '
+            split("\n") |
+            .[] |
+            if test("^/") then
+                gsub(" +"; " ") | split(" ") | {mount: .[0], spacetotal: .[1], spaceused: .[2], spaceavail: .[3]}
+            else
+                empty
+            end
+        ' | jq .spaceavail | tr -d '"'
+  args:
+    executable: /bin/bash
+  register: _result_free_storage
+  loop: "{{ groups['all_hosts'] }}"
+  delegate_to: "{{ item }}"
+  changed_when: "_result_free_storage.rc == 0"
+
+- name: Debug
+  ansible.builtin.debug:
+    var: _result_free_storage
+
+- name: Define the hypervisors disk free space dictionary
+  ansible.builtin.set_fact:
+    kubeinit_validations_hypervisors_free_disk_space: "{{ kubeinit_validations_hypervisors_free_disk_space|default([]) | combine( {item.item: item.stdout[:-1]|int} ) }}"
+  loop: "{{ _result_free_storage.results }}"
+
+- name: Debug
+  ansible.builtin.debug:
+    var: kubeinit_validations_hypervisors_free_disk_space
+
+- name: Get the total inventory disk usage
+  ansible.builtin.set_fact:
+    kubeinit_validations_libvirt_disk_usage: "{{ kubeinit_validations_libvirt_disk_usage|default({})| combine( {item: {'id': item, 'disk': hostvars[item].disk[:-1]|int, 'target': hostvars[item].target} } ) }}"
+  loop: "{{ groups['all_guest_vms'] }}"
+
+- name: Debug
+  ansible.builtin.debug:
+    var: kubeinit_validations_libvirt_disk_usage
+
+- name: Set combined disk requirement per hypervisor
+  ansible.builtin.set_fact:
+    kubeinit_validations_libvirt_combined_disk_usage: >-
+      {{ kubeinit_validations_libvirt_combined_disk_usage | default({})
+        | combine({item.value.target: []
+        + [{
+            'disk': item.value.disk,
+            'id': item.value.id
+          }]
+        + kubeinit_validations_libvirt_combined_disk_usage[item.value.target] | default([]) })
+      }}
+  loop: "{{ kubeinit_validations_libvirt_disk_usage | dict2items }}"
+
+- name: Debug
+  ansible.builtin.debug:
+    var: kubeinit_validations_libvirt_combined_disk_usage
+
+- name: Set the summarized disk usage per hypervisor
+  ansible.builtin.set_fact:
+    kubeinit_validations_libvirt_summarized_disk_usage: "{{ kubeinit_validations_libvirt_summarized_disk_usage|default([]) | combine( {item: my_attribute} ) }}"
+  vars:
+    my_attribute: "{{ kubeinit_validations_libvirt_combined_disk_usage[item] | map(attribute='disk') | list | sum }}"
+  loop: "{{ kubeinit_validations_libvirt_combined_disk_usage.keys() }}"
+
+- name: Debug
+  ansible.builtin.debug:
+    var: kubeinit_validations_libvirt_summarized_disk_usage
+
+- name: Debug
+  ansible.builtin.debug:
+    var: item
+  loop: "{{ kubeinit_validations_hypervisors_free_disk_space | dict2items }}"
+
+- name: Make sure there is enough free space
+  ansible.builtin.assert:
+    that:
+      - kubeinit_validations_hypervisors_free_disk_space[item.key]|int > item.value|float * 1.1
+    msg: "It seems there is not enough disk space (Required: {{ kubeinit_validations_libvirt_summarized_disk_usage }} Available: {{ kubeinit_validations_hypervisors_free_disk_space }})"
+  loop: "{{ kubeinit_validations_libvirt_summarized_disk_usage | dict2items }}"
+  when: kubeinit_ignore_validation_checks is not defined

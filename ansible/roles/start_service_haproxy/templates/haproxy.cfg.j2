@@ -1,0 +1,116 @@
+# This file is rendered using a template from a KubeInit role
+# This file will be overridden each time the playbook runs
+# No not edit directly
+# More information at: https://github.com/kubeinit/kubeinit
+
+#---------------------------------------------------------------------
+# Global settings
+#---------------------------------------------------------------------
+global
+    maxconn     {{ kubeinit_haproxy_global_maxconn }}
+    log         {{ kubeinit_haproxy_global_log }}
+    chroot      /var/lib/haproxy
+    pidfile     /var/run/haproxy.pid
+    user        haproxy
+    group       haproxy
+    daemon
+
+    # turn on stats unix socket
+    stats socket /var/lib/haproxy/stats
+
+#---------------------------------------------------------------------
+# common defaults that all the 'listen' and 'backend' sections will
+# use if not designated in their block
+#---------------------------------------------------------------------
+defaults
+    mode                    http
+    log                     global
+    option                  httplog
+    option                  dontlognull
+    option http-server-close
+    option forwardfor       except 127.0.0.0/8
+    option                  redispatch
+    retries                 3
+    timeout http-request    10s
+    timeout queue           1m
+    timeout connect         10s
+    timeout client          {{ kubeinit_haproxy_defaults_timeout_client }}
+    timeout server          {{ kubeinit_haproxy_defaults_timeout_server }}
+    timeout http-keep-alive 10s
+    timeout check           10s
+    maxconn                 {{ kubeinit_haproxy_defaults_maxconn }}
+
+listen stats
+    bind :{{ kubeinit_haproxy_listen_stats_bind }}
+    mode http
+    stats enable
+    stats uri /
+    monitor-uri /healthz
+
+frontend kube_api_fe
+    bind :6443
+    default_backend kube_api_be
+    mode tcp
+    option tcplog
+
+backend kube_api_be
+    balance source
+    mode tcp
+{% for host in groups['all_extra_nodes'] | default([]) | list %}
+    server      {{ host }} {{ hostvars[host].ansible_host }}:6443 check
+{% endfor %}
+{% for host in groups['all_controller_nodes'] | list %}
+    server      {{ host }} {{ hostvars[host].ansible_host }}:6443 check
+{% endfor %}
+
+frontend machine_config_server_fe
+    bind :22623
+    default_backend machine_config_server_be
+    mode tcp
+    option tcplog
+
+backend machine_config_server_be
+    balance source
+    mode tcp
+{% for host in groups['all_extra_nodes'] | default([]) | list %}
+    server      {{ host }} {{ hostvars[host].ansible_host }}:22623 check
+{% endfor %}
+{% for host in groups['all_controller_nodes'] | list %}
+    server      {{ host }} {{ hostvars[host].ansible_host }}:22623 check
+{% endfor %}
+
+frontend http_ingress_traffic_fe
+    bind :80
+    default_backend http_ingress_traffic_be
+    mode tcp
+    option tcplog
+
+backend http_ingress_traffic_be
+    balance source
+    mode tcp
+{% for host in groups['all_compute_nodes'] | default([]) | list %}
+    server      {{ host }} {{ hostvars[host].ansible_host }}:80 check
+{% endfor %}
+{% for host in groups['all_controller_nodes'] | list %}
+{% if not kubeinit_compute_count|int > 0 %}
+    server      {{ host }} {{ hostvars[host].ansible_host }}:80 check
+{% endif %}
+{% endfor %}
+
+frontend https_ingress_traffic_fe
+    bind :443
+    default_backend https_ingress_traffic_be
+    mode tcp
+    option tcplog
+
+backend https_ingress_traffic_be
+    balance source
+    mode tcp
+{% for host in groups['all_compute_nodes'] | default([]) | list %}
+    server      {{ host }} {{ hostvars[host].ansible_host }}:443 check
+{% endfor %}
+{% for host in groups['all_controller_nodes'] | list %}
+{% if not kubeinit_compute_count|int > 0 %}
+    server      {{ host }} {{ hostvars[host].ansible_host }}:443 check
+{% endif %}
+{% endfor %}

@@ -1,0 +1,39 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set cluster dhcp facts
+  ansible.builtin.set_fact:
+    kubeinit_cluster_dhcp_start: "{{ kubeinit_cluster_next_available | ansible.utils.ipv4('address') }}"
+    kubeinit_cluster_dhcp_end: "{{ kubeinit_cluster_last_available | ansible.utils.ipv4('address') }}"
+
+- name: Set cluster dhcp range size
+  ansible.builtin.set_fact:
+    kubeinit_cluster_dhcp_count: "{{ (kubeinit_cluster_dhcp_end | ansible.utils.ipv4('int') | int) - (kubeinit_cluster_dhcp_start | ansible.utils.ipv4('int') | int) + 1 }}"
+
+- name: Assert sufficient dhcp range
+  ansible.builtin.assert:
+    that:
+      - kubeinit_cluster_dhcp_count|int > 0
+
+- name: Assign dhcp facts
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_cluster_name }}"
+    dhcp_start: "{{ kubeinit_cluster_dhcp_start }}"
+    dhcp_end: "{{ kubeinit_cluster_dhcp_end }}"
+
+- name: Clear kubeinit_network_hostvars
+  ansible.builtin.set_fact:
+    kubeinit_network_hostvars: null
