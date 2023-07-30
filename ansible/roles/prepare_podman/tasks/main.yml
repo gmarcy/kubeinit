@@ -1,0 +1,139 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Install podman dependencies if requested
+  block:
+
+    - name: Setup kubeinit repo for Debian distribution
+      block:
+
+        - name: Set cgroup_manager for debian release
+          ansible.builtin.copy:
+            content: |
+              [engine]
+              cgroup_manager = "cgroupfs"
+            dest: '/etc/containers/containers.conf'
+            mode: '0644'
+          become: true
+          become_user: root
+
+        - name: Set version facts
+          ansible.builtin.set_fact:
+            _version: "{{ _param_hostvars.ansible_distribution_version.split('-')[0] }}"
+
+        - name: Set version facts
+          ansible.builtin.set_fact:
+            _stability: "{{ 'stable' if (_version is version('11', 'le')) else 'testing' }}"
+
+        - name: Set version facts
+          ansible.builtin.set_fact:
+            _path_element: "{{ _param_hostvars.ansible_distribution + '_' + _version if (_stability is 'stable') else _param_hostvars.ansible_distribution + '_testing' }}"
+
+      when: _param_hostvars.ansible_distribution == 'Debian'
+
+    - name: Setup kubeinit repo for Ubuntu distribution
+      block:
+
+        - name: Set version facts
+          ansible.builtin.set_fact:
+            _version: "{{ _param_hostvars.ansible_distribution_version }}"
+            _stability: "{{ 'stable' if (_param_hostvars.ansible_distribution_version is version('22.04', 'le')) else 'testing' }}"
+
+        - name: Set version facts
+          ansible.builtin.set_fact:
+            _path_element: "{{ '/x' + _param_hostvars.ansible_distribution + '_' + _version }}"
+
+      when: _param_hostvars.ansible_distribution == 'Ubuntu'
+
+    - name: Setup kubeinit repo for Debian family
+      block:
+
+        - name: Make sure we have curl installed
+          ansible.builtin.package:
+            name: curl
+            state: present
+          become: true
+          become_user: root
+
+        - name: Add the Podman kubeinit package repository to Apt
+          ansible.builtin.shell: |
+            set -eo pipefail
+            echo "deb https://download.opensuse.org/repositories/home:/kubeinit/{{ _path_element }}/ /" > /etc/apt/sources.list.d/kubeinit.list
+            curl -L "https://download.opensuse.org/repositories/home:/kubeinit/{{ _path_element }}/Release.key" | apt-key add -
+            apt-get update
+          args:
+            executable: /bin/bash
+          become: true
+          become_user: root
+          register: _result
+          changed_when: "_result.rc == 0"
+
+      when: _param_hostvars.distribution_family == 'Debian'
+
+    - name: Install podman dependencies
+      ansible.builtin.package:
+        name: "{{ kubeinit_prepare_podman_dependencies }}"
+        state: present
+      become: true
+      become_user: root
+
+    - name: Ensure default_capabilities is consistent in the hypervisors
+      community.general.ini_file:
+        path: /etc/containers/containers.conf
+        section: containers
+        option: default_capabilities
+        value: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"]
+        backup: true
+        mode: '0644'
+
+  when: _param_install_dependencies | default(false)
+
+- name: Authenticate with dockerhub username/password if defined
+  block:
+
+    - name: Set tasks-hidden fact
+      ansible.builtin.set_fact:
+        _results: "{{ _results | combine({'tasks-hidden': not (lookup('env', 'KUBEINIT_PODMAN_SHOW_TASKS') or false)}) }}"
+      no_log: true
+
+    - name: Set facts for dockerhub secrets
+      block:
+        - name: Set username_secret
+          ansible.builtin.set_fact:
+            _results: "{{ _results | combine({'username-secret': hostvars['kubeinit-secrets'].secrets['dockerhub-username']}) }}"
+          when: hostvars['kubeinit-secrets'].secrets['dockerhub-username'] | default('') | length > 0
+
+        - name: Set password_secret
+          ansible.builtin.set_fact:
+            _results: "{{ _results | combine({'password-secret': hostvars['kubeinit-secrets'].secrets['dockerhub-password']}) }}"
+          when: hostvars['kubeinit-secrets'].secrets['dockerhub-password'] | default('') | length > 0
+      no_log: "{{ _results['tasks-hidden'] }}"
+
+    - name: Podman login to docker.io
+      containers.podman.podman_login:
+        username: "{{ lookup('unvault', _results['username-secret']) | trim }}"
+        password: "{{ lookup('unvault', _results['password-secret']) | trim }}"
+        registry: "docker.io"
+      no_log: "{{ _results['tasks-hidden'] }}"
+      when: (_results['username-secret'] is defined) and (_results['password-secret'] is defined)
+
+    - name: Clear any reference to dockerhub secrets
+      ansible.builtin.set_fact:
+        _results: {}
+      no_log: "{{ _results['tasks-hidden'] }}"
+
+  vars:
+    _results: {}

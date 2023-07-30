@@ -1,0 +1,216 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Delegate to the service node target
+  block:
+
+    - name: Install buildah if required
+      ansible.builtin.package:
+        state: present
+        name: "buildah"
+
+    - name: Remove any old buildah container
+      ansible.builtin.shell: |
+        set -eo pipefail
+        if [ "$(buildah ls --filter 'name={{ kubeinit_cluster_name }}-credentials' --format {% raw %}'{{ .ContainerName }}'{% endraw %})" != "" ]
+        then
+          buildah rm {{ kubeinit_cluster_name }}-credentials
+        fi
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Create a new working container image
+      ansible.builtin.command: buildah from --name {{ kubeinit_cluster_name }}-credentials {{ kubeinit_services_container_image }}
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Update the container
+      ansible.builtin.command: buildah run {{ kubeinit_cluster_name }}-credentials -- dnf update -q -y
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Install commands and services we will need
+      ansible.builtin.command: buildah run {{ kubeinit_cluster_name }}-credentials -- dnf install -q -y python3 python3-pip procps iproute iputils net-tools bind-utils
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Set kubeinit-cluster-name label
+      ansible.builtin.command: buildah config --label kubeinit-cluster-name={{ kubeinit_cluster_name }} {{ kubeinit_cluster_name }}-credentials
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Commit the image
+      ansible.builtin.command: buildah commit {{ kubeinit_cluster_name }}-credentials kubeinit/{{ kubeinit_cluster_name }}-credentials:latest
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Remove the buildah container
+      ansible.builtin.command: buildah rm {{ kubeinit_cluster_name }}-credentials
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Remove any previous credentials container
+      containers.podman.podman_container:
+        name: "{{ kubeinit_cluster_name }}-credentials"
+        state: absent
+
+    - name: Create podman credentials container
+      containers.podman.podman_container:
+        name: "{{ kubeinit_cluster_name }}-credentials"
+        image: kubeinit/{{ kubeinit_cluster_name }}-credentials:latest
+        pod: "{{ kubeinit_deployment_pod_name }}"
+        init: true
+        cap_add:
+          - "AUDIT_WRITE"
+        volumes:
+          - "{{ kubeinit_services_data_volume }}:/var/kubeinit"
+        command: sleep infinity
+
+    - name: Run dnf to bring container up to date
+      ansible.builtin.command: podman exec "{{ kubeinit_cluster_name }}-credentials" dnf update -y
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Install python3
+      ansible.builtin.command: podman exec "{{ kubeinit_cluster_name }}-credentials" dnf install -y python3 openssh
+      register: _result
+      changed_when: "_result.rc == 0"
+
+  delegate_to: "{{ kubeinit_deployment_delegate }}"
+
+- name: Add remote container to hosts
+  ansible.builtin.add_host:
+    hostname: "{{ kubeinit_cluster_name }}-credentials"
+    ansible_connection: containers.podman.podman
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_podman_extra_args: --remote --connection "{{ hostvars[inventory_hostname].target }}"
+
+- name: Disable pipelining while using podman connector
+  block:
+
+    - name: "Wait for connection to the container <cluster_name>-credentials: {{ kubeinit_cluster_name }}"
+      ansible.builtin.wait_for_connection:
+        connect_timeout: 20
+        sleep: 5
+        delay: 5
+        timeout: 300
+
+    - name: Create html folder
+      ansible.builtin.file:
+        path: /var/kubeinit/html
+        state: directory
+        mode: '0755'
+
+    - name: Make sure packages to generate registry credentials are installed
+      ansible.builtin.package:
+        state: present
+        name: "{{ kubeinit_registry_required_packages | default([]) }}"
+
+    - name: Install cryptography and passlib
+      ansible.builtin.shell: |
+        set -o pipefail
+        python3 -m pip install cryptography==3.3.2 passlib
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Create directory to hold the registry files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ kubeinit_service_user }}"
+        group: "{{ kubeinit_service_user }}"
+        mode: u=rwX,g=rX,o=rX
+        recurse: yes
+      loop: "{{ kubeinit_registry_directories }}"
+
+    - name: Generate the htpasswd entry
+      community.general.htpasswd:
+        path: "{{ kubeinit_registry_directory_auth }}/htpasswd"
+        name: "{{ kubeinit_registry_user }}"
+        password: "{{ kubeinit_registry_password }}"
+        owner: "{{ kubeinit_service_user }}"
+        group: "{{ kubeinit_service_user }}"
+        crypt_scheme: "bcrypt"
+        mode: '0755'
+      no_log: "{{ not ((lookup('env', 'KUBEINIT_SHOW_TASKS') | bool) or false) }}"
+
+    - name: Generate an OpenSSL private key
+      community.crypto.openssl_privatekey:
+        path: "{{ kubeinit_registry_directory_cert }}/domain.key"
+
+    - name: Generate an OpenSSL CSR
+      community.crypto.openssl_csr:
+        path: "{{ kubeinit_registry_directory_cert }}/domain.csr"
+        privatekey_path: "{{ kubeinit_registry_directory_cert }}/domain.key"
+        common_name: "{{ kubeinit_registry_fqdn }}"
+        country_name: "{{ hostvars['kubeinit-env'].certificate_country }}"
+        state_or_province_name: "{{ hostvars['kubeinit-env'].certificate_state }}"
+        locality_name: "{{ hostvars['kubeinit-env'].certificate_locality }}"
+        organization_name: "{{ hostvars['kubeinit-env'].certificate_organization }}"
+        organizational_unit_name: "{{ hostvars['kubeinit-env'].certificate_organizational_unit }}"
+        basic_constraints_critical: yes
+        create_subject_key_identifier: yes
+        basic_constraints: ['CA:TRUE']
+        subject_alt_name: "{{ dns_servers | map('regex_replace', '^', 'DNS:') | list }}"
+      vars:
+        dns_servers:
+          - "{{ kubeinit_registry_service_node }}"
+          - "{{ kubeinit_registry_fqdn }}"
+          - "{{ kubeinit_registry_fqdn_alt }}"
+
+    - name: Generate a selfsigned OpenSSL CA Certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubeinit_registry_directory_cert }}/domainCA.crt"
+        privatekey_path: "{{ kubeinit_registry_directory_cert }}/domain.key"
+        csr_path: "{{ kubeinit_registry_directory_cert }}/domain.csr"
+        provider: selfsigned
+
+    - name: Generate an ownca OpenSSL Certificate
+      community.crypto.x509_certificate:
+        path: "{{ kubeinit_registry_domain_cert }}"
+        ownca_privatekey_path: "{{ kubeinit_registry_directory_cert }}/domain.key"
+        csr_path: "{{ kubeinit_registry_directory_cert }}/domain.csr"
+        ownca_path: "{{ kubeinit_registry_directory_cert }}/domainCA.crt"
+        ownca_create_authority_key_identifier: yes
+        provider: ownca
+
+    - name: Read in the contents of domain.crt
+      ansible.builtin.slurp:
+        src: "{{ kubeinit_registry_domain_cert }}"
+      register: _result_domain_cert_b64
+
+    - name: Add contents of domain.crt to cluster vars
+      ansible.builtin.add_host:
+        name: "{{ kubeinit_cluster_name }}"
+        domain_cert: "{{ _result_domain_cert_b64.content | string | b64decode }}"
+
+    - name: Update kubeinit_cluster_hostvars
+      ansible.builtin.set_fact:
+        kubeinit_cluster_hostvars: "{{ hostvars[kubeinit_cluster_name] }}"
+
+  vars:
+    ansible_ssh_pipelining: False
+  delegate_to: "{{ kubeinit_cluster_name }}-credentials"
+
+- name: Remove credentials container
+  containers.podman.podman_container:
+    name: "{{ kubeinit_cluster_name }}-credentials"
+    state: absent
+  delegate_to: "{{ kubeinit_deployment_delegate }}"

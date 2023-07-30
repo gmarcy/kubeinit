@@ -1,0 +1,68 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Parse kubeinit_network_spec into a dictionary when defined
+  ansible.builtin.set_fact:
+    kubeinit_network_map: "{{ kubeinit_network_spec | from_yaml }}"
+  when: kubeinit_network_spec is defined
+
+- name: Define kubeinit_network_name
+  ansible.builtin.set_fact:
+    kubeinit_network_name: "{{ kubeinit_network_map['network_name'] | default(hostvars['kubeinit-defaults'].default_network_name) }}"
+
+- name: Use kubeinit_network_name as host for kubeinit_network group and load default properties
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_network_name }}"
+    groups: 'kubeinit_network'
+
+- name: Add kubeinit_network_map entries to kubeint_network group
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_network_name }}"
+    groups: 'kubeinit_network'
+    network: "{{ kubeinit_network_map['network'] | default(omit) }}"
+    gateway_offset: "{{ kubeinit_network_map['gateway_offset'] | default(omit) }}"
+    dhcp_start_offset: "{{ kubeinit_network_map['dhcp_start_offset'] | default(omit) }}"
+    dhcp_end_offset: "{{ kubeinit_network_map['dhcp_end_offset'] | default(omit) }}"
+  when: kubeinit_network_spec is defined
+
+- name: Define kubeinit_network_hostvars and kubeinit_fact_natwork
+  ansible.builtin.set_fact:
+    kubeinit_network_hostvars: "{{ hostvars[kubeinit_network_name] }}"
+    kubeinit_fact_network: "{{ hostvars[kubeinit_network_name].network }}"
+
+- name: Set facts from kubeinit_network group
+  ansible.builtin.set_fact:
+    kubeinit_cluster_network_name: "{{ kubeinit_network_name }}"
+    kubeinit_cluster_network: "{{ kubeinit_fact_network | ansible.utils.ipv4('net') }}"
+    kubeinit_cluster_prefix: "{{ kubeinit_fact_network | ansible.utils.ipv4('prefix') }}"
+    kubeinit_cluster_netmask: "{{ kubeinit_fact_network | ansible.utils.ipv4('netmask') | ansible.utils.ipv4('address') }}"
+    kubeinit_cluster_gateway: "{{ kubeinit_fact_network | ansible.utils.ipv4(kubeinit_network_hostvars.gateway_offset|int) | ansible.utils.ipv4('address') }}"
+    kubeinit_cluster_next_available: "{{ kubeinit_fact_network | ansible.utils.ipv4(kubeinit_network_hostvars.dhcp_start_offset|int) | ansible.utils.ipv4('address') }}"
+    kubeinit_cluster_last_available: "{{ kubeinit_fact_network | ansible.utils.ipv4(kubeinit_network_hostvars.dhcp_end_offset|int) | ansible.utils.ipv4('address') }}"
+
+- name: Assert additional constraints
+  ansible.builtin.assert:
+    that:
+      - kubeinit_cluster_prefix|int < 30
+
+- name: Add cluster network facts to cluster facts
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_cluster_name }}"
+    network_name: "{{ kubeinit_cluster_network_name }}"
+    network: "{{ kubeinit_cluster_network }}"
+    prefix: "{{ kubeinit_cluster_prefix }}"
+    netmask: "{{ kubeinit_cluster_netmask }}"
+    gateway: "{{ kubeinit_cluster_gateway }}"

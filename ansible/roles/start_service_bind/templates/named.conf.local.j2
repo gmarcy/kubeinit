@@ -1,0 +1,62 @@
+/* This file is rendered using a template from a KubeInit role */
+/* This file will be overriden each time the playbook runs */
+/* No not edit directly */
+/* More information at: https://github.com/kubeinit/kubeinit */
+
+acl internals {
+    127.0.0.0/8;
+    {{ kubeinit_cluster_network }};
+};
+
+view "internal" {
+    match-clients { internals; };
+
+    include "/etc/bind/zones.rfc1918";
+    include "/etc/bind/named.conf.default-zones";
+
+    /*zone "." IN {*/
+    /*    type hint;*/
+    /*    file "named.ca";*/
+    /*};*/
+
+    zone "{{ kubeinit_cluster_fqdn }}" {
+        type master;
+        file "/etc/bind/kubeinit/zones/internals/db.{{ kubeinit_cluster_fqdn }}"; # zone file path
+    };
+
+    zone "{{ kubeinit_bind_service_address | ipaddr('revdns') | regex_replace('^[0-9]+\\.', '') }}" {
+        type master;
+        file "/etc/bind/kubeinit/zones/internals/db.{{ kubeinit_bind_service_address | ipsubnet(24) | ipaddr('network') }}";  # 192.168.1.0/24 subnet
+    };
+
+{% for cluster in groups['kubeinit_clusters'] | default([]) %}
+    {% if not cluster == kubeinit_cluster_name %}
+        {% set cluster_net_name = hostvars[cluster].network_name %}
+        {% set cluster_nameserver_net = hostvars[cluster_net_name].network %}
+        {% set cluster_nameserver_offset = hostvars[cluster_net_name].nameserver_offset %}
+        {% set cluster_nameserver_addr = cluster_nameserver_net | ansible.utils.ipv4(cluster_nameserver_offset|int) | ansible.utils.ipv4('address') %}
+    zone "{{ cluster }}.{{ hostvars[kubeinit_cluster_name].cluster_domain }}" IN {
+        type forward;
+        forward only;
+        forwarders {
+            {{ cluster_nameserver_addr }};
+        };
+    };
+    {% endif %}
+{% endfor %}
+};
+
+acl bridge {
+    172.16.0.0/24;
+};
+
+view "bridge" {
+    match-clients { bridge; };
+    allow-query { any; };
+
+    zone "{{ kubeinit_cluster_fqdn }}" {
+        type master;
+        file "/etc/bind/kubeinit/zones/internals/db.{{ kubeinit_cluster_fqdn }}"; # zone file path
+    };
+
+};

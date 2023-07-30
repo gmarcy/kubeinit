@@ -1,0 +1,553 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+#
+# Configure OVN on all the HVs
+#
+
+#
+# We install all OVN requirements in the ovn-central host
+#
+- name: Install OVN central packages in CentOS/RHEL
+  ansible.builtin.shell: |
+    dnf install -y centos-release-nfv-openvswitch
+    dnf install -y openvswitch2.16 \
+                   ovn-2021 \
+                   ovn-2021-central \
+                   ovn-2021-host
+  args:
+    executable: /bin/bash
+  register: _result
+  changed_when: "_result.rc == 0"
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+  when: hostvars[kubeinit_ovn_central_host].distribution_family == 'CentOS'
+
+- name: Install OVN central packages in Fedora
+  ansible.builtin.command: |
+    dnf install -y openvswitch \
+                   ovn \
+                   ovn-central \
+                   ovn-host
+  register: _result
+  changed_when: "_result.rc == 0"
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+  when: hostvars[kubeinit_ovn_central_host].distribution_family == 'Fedora'
+
+- name: Install OVN central packages in Ubuntu/Debian
+  ansible.builtin.command: |
+    apt-get install -y openvswitch-common \
+                       openvswitch-switch \
+                       ovn-common \
+                       ovn-host \
+                       ovn-central
+  register: _result
+  changed_when: "_result.rc == 0"
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+  when: hostvars[kubeinit_ovn_central_host].distribution_family == 'Debian'
+
+#
+# We DO NOT install ovn-central (OVN requirement) in the other hypervisors
+#
+- name: Collect all HVs which are not the ovn-central host
+  ansible.builtin.set_fact:
+    kubeinit_other_ovn_hosts: "{{ (kubeinit_other_ovn_hosts | default([])) + [ovn_host] }}"
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  when: ovn_host not in kubeinit_ovn_central_host
+
+- name: Install OVN host packages in CentOS/RHEL
+  ansible.builtin.shell: |
+    dnf install -y centos-release-nfv-openvswitch
+    dnf install -y openvswitch2.16 \
+                   ovn-2021 \
+                   ovn-2021-host
+  args:
+    executable: /bin/bash
+  register: _result
+  changed_when: "_result.rc == 0"
+  loop: "{{ kubeinit_other_ovn_hosts | default([]) }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: hostvars[ovn_host].distribution_family == 'CentOS'
+
+- name: Install OVN host packages in Fedora
+  ansible.builtin.command: |
+    dnf install -y openvswitch \
+                   ovn \
+                   ovn-host
+  register: _result
+  changed_when: "_result.rc == 0"
+  loop: "{{ kubeinit_other_ovn_hosts | default([]) }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: hostvars[ovn_host].distribution_family == 'Fedora'
+
+- name: Install OVN host packages in Ubuntu/Debian
+  ansible.builtin.command: |
+    apt-get install -y openvswitch-common \
+                       openvswitch-switch \
+                       ovn-common \
+                       ovn-host
+  register: _result
+  changed_when: "_result.rc == 0"
+  loop: "{{ kubeinit_other_ovn_hosts | default([]) }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: hostvars[ovn_host].distribution_family == 'Debian'
+
+#
+# Configure firewalld as needed
+#
+- name: Gather current firewalld rules for ovn hosts
+  ansible.posix.firewalld_info:
+    active_zones: true
+  register: _result_firewalld_info
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: hostvars[ovn_host].firewalld_is_active
+
+- name: Set fact for expected rich_rule result
+  ansible.builtin.set_fact:
+    rich_rule_result: "rule family=\"ipv4\" source address=\"{{ kubeinit_cluster_network }}\" masquerade"
+
+- name: Check firewalld services and rich_rules for existing entries
+  ansible.builtin.add_host:
+    name: "{{ item.ovn_host }}"
+    add_ovn_rich_rule: "{{ true if (rich_rule_result not in default_zone_info.rich_rules) else false }}"
+    add_ovn_central_service: "{{ true if ('ovn-central-firewall-service' not in default_zone_info.services) else false }}"
+    add_ovn_host_service: "{{ true if ('ovn-host-firewall-service' not in default_zone_info.services) else false }}"
+    reload_firewalld: "{{ true if ('ovn-host-firewall-service' not in default_zone_info.services) else false }}"
+  loop: "{{ _result_firewalld_info.results }}"
+  vars:
+    default_zone_info: "{{ item.firewalld_info.zones[item.firewalld_info.default_zone] }}"
+  when: item.firewalld_info is defined
+
+- name: Refresh firewalld services list to pick up ovn services
+  ansible.builtin.command: |
+    firewall-cmd --reload
+  register: _result
+  changed_when: "_result.rc == 0"
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: hostvars[ovn_host].reload_firewalld | default(false)
+
+- name: Enable OVN central in firewalld
+  ansible.posix.firewalld:
+    service: ovn-central-firewall-service
+    permanent: true
+    state: enabled
+    immediate: true
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+  when: hostvars[kubeinit_ovn_central_host].add_ovn_central_service | default(false)
+
+- name: Enable OVN NAT in firewalld
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ kubeinit_cluster_network }} masquerade"
+    permanent: true
+    state: enabled
+    immediate: true
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+  when: hostvars[kubeinit_ovn_central_host].add_ovn_rich_rule | default(false)
+
+- name: Enable OVN host in firewalld
+  ansible.posix.firewalld:
+    service: ovn-host-firewall-service
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: hostvars[ovn_host].add_ovn_host_service | default(false)
+
+- name: Refresh firewalld services list
+  ansible.builtin.command: |
+    firewall-cmd --reload
+  register: _result
+  changed_when: "_result.rc == 0"
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: hostvars[ovn_host].reload_firewalld | default(false)
+
+- name: Reload podman networks
+  ansible.builtin.command: |
+    podman network reload --all
+  register: _result
+  changed_when: "_result.rc == 0"
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: hostvars[ovn_host].reload_firewalld | default(false) and hostvars[ovn_host].podman_is_installed | default(false)
+
+- name: Only restart if this is the only cluster network
+  block:
+
+    - name: Enable and start OVN services in the ovn-central hypervisor (CentOS based)
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - openvswitch
+        - ovn-northd
+        - ovn-controller
+      delegate_to: "{{ kubeinit_ovn_central_host }}"
+      when: hostvars[kubeinit_ovn_central_host].distribution_family != 'Debian'
+
+    - name: Enable and start OVN services in the rest of the hypervisors (CentOS based)
+      ansible.builtin.service:
+        name: "{{ service_name }}"
+        state: started
+        enabled: yes
+      loop: "{{ kubeinit_other_ovn_hosts | default([]) | product(['openvswitch', 'ovn-controller']) }}"
+      vars:
+        ovn_host: "{{ item[0] }}"
+        service_name: "{{ item[1] }}"
+      delegate_to: "{{ ovn_host }}"
+      when: hostvars[ovn_host].distribution_family != 'Debian'
+
+    - name: Enable and start OVN services in the ovn-central hypervisor (Debian/Ubuntu based)
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - openvswitch-switch
+        - ovn-host
+        - ovn-central
+      delegate_to: "{{ kubeinit_ovn_central_host }}"
+      when: hostvars[kubeinit_ovn_central_host].distribution_family == 'Debian'
+
+    - name: Enable and start OVN services in the rest of the hypervisors (Debian/Ubuntu based)
+      ansible.builtin.service:
+        name: "{{ service_name }}"
+        state: started
+        enabled: yes
+      loop: "{{ kubeinit_other_ovn_hosts | default([]) | product(['openvswitch-switch', 'ovn-host']) }}"
+      vars:
+        ovn_host: "{{ item[0] }}"
+        service_name: "{{ item[1] }}"
+      delegate_to: "{{ ovn_host }}"
+      when: hostvars[ovn_host].distribution_family == 'Debian'
+
+    - name: Wait until OVN services are running
+      ansible.builtin.command: /usr/share/ovn/scripts/ovn-ctl status_northd
+      register: _result
+      changed_when: "_result.rc == 0"
+      retries: 6
+      delay: 10
+      delegate_to: "{{ kubeinit_ovn_central_host }}"
+      until: "'ovn-northd is running' in _result.stdout"
+
+  when: kubeinit_destroy_ovn_network
+
+- name: Wait for changes to propagate
+  ansible.builtin.command: |
+    /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 sync
+  register: _result
+  changed_when: "_result.rc == 0"
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+
+- name: Configure OVS on the Hypervisors
+  ansible.builtin.shell: |
+    CENTRAL_IP={{ hostvars[kubeinit_ovn_central_host].ssh_connection_address }} # This is the IP of the ovn-central HV
+    LOCAL_IP={{ hostvars[ovn_host].ssh_connection_address }} # This is the IP of the current HV
+    ENCAP_TYPE={{ kubeinit_libvirt_ovn_encapsulation }}
+    /usr/bin/ovs-vsctl set Open_vSwitch . \
+        external_ids:ovn-remote="tcp:$CENTRAL_IP:{{ kubeinit_libvirt_ovn_southbound_port }}" \
+        external_ids:ovn-nb="tcp:$CENTRAL_IP:{{ kubeinit_libvirt_ovn_northbound_port }}" \
+        external_ids:ovn-encap-ip=$LOCAL_IP \
+        external_ids:ovn-encap-type="$ENCAP_TYPE" \
+        external_ids:system-id="{{ ovn_host }}"
+    # On each HV lets create a virtual bridge br-int
+    # This bridge will be used when we create the VMs
+    /usr/bin/ovs-vsctl --may-exist add-br br-int
+  args:
+    executable: /bin/bash
+  register: _result
+  changed_when: "_result.rc == 0"
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+  when: kubeinit_destroy_ovn_network
+
+- name: Wait for changes to propagate
+  ansible.builtin.command: |
+    /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 sync
+  register: _result
+  changed_when: "_result.rc == 0"
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+
+#
+# OVN post deployment configuration steps.
+#
+- name: Delegate to kubeinit_ovn_central_host
+  block:
+
+    - name: Configure OVN in the ovn-central hypervisor
+      ansible.builtin.shell: |
+        # Below two commands only for central. For SSL, other steps are required.
+        /usr/bin/ovn-nbctl set-connection ptcp:{{ kubeinit_libvirt_ovn_northbound_port }}
+        /usr/bin/ovn-sbctl set-connection ptcp:{{ kubeinit_libvirt_ovn_southbound_port }}
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+      when: kubeinit_destroy_ovn_network
+
+    - name: Wait for changes to propagate
+      ansible.builtin.command: |
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 sync
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    #
+    # We create the OVN switch that will be bound to each chassis (hypervisor)
+    # In this switch we will create a port per guest
+    #
+    - name: Remove and create the cluster switch if exists
+      ansible.builtin.shell: |
+        #
+        # Create a logical switch
+        #
+        /usr/bin/ovn-nbctl ls-del sw-{{ kubeinit_cluster_name }}
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 ls-add sw-{{ kubeinit_cluster_name }}
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Wait for changes to propagate
+      ansible.builtin.command: |
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 sync
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Create OVS/OVN bindings for the VMs ports
+      ansible.builtin.shell: |
+        #
+        # We create an OVN port using the interface ID and the mac address of the VM
+        #
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 lsp-add sw-{{ kubeinit_cluster_name }} {{ hostvars[item].interfaceid }}
+        #
+        # The port name is the interface id of the VM, now we assign the mac address of the VM to the port
+        #
+        /usr/bin/ovn-nbctl --wait=sb --wait=sb --timeout=30 lsp-set-addresses {{ hostvars[item].interfaceid }} "{{ hostvars[item].mac }} {{ hostvars[item].ansible_host }}"
+        /usr/bin/ovn-nbctl --wait=sb --wait=sb --timeout=30 lsp-set-port-security {{ hostvars[item].interfaceid }} "{{ hostvars[item].mac }} {{ hostvars[item].ansible_host }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ groups['all_nodes'] }}"
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Wait for changes to propagate
+      ansible.builtin.command: |
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 sync
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Configuring a router connected to the guests switch
+      ansible.builtin.shell: |
+        #
+        # Create a logical router to connect the VMs switch
+        #
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 lr-add lr0
+        #
+        # We create the external access switch
+        #
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 ls-add public
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 lrp-add lr0 lr0-public {{ '00:00:20' | community.general.random_mac }} 172.16.0.1/24
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 lsp-add public public-lr0
+        /usr/bin/ovn-nbctl lsp-set-type public-lr0 router
+        /usr/bin/ovn-nbctl lsp-set-addresses public-lr0 router
+        /usr/bin/ovn-nbctl lsp-set-options public-lr0 router-port=lr0-public
+        #
+        # Create a localnet port
+        #
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 lsp-add public public-ln
+        /usr/bin/ovn-nbctl lsp-set-type public-ln localnet
+        /usr/bin/ovn-nbctl lsp-set-addresses public-ln unknown
+        /usr/bin/ovn-nbctl lsp-set-options public-ln network_name=provider
+        #
+        # We add a bridge mapping from br-ex called provider
+        #
+        /usr/bin/ovs-vsctl set Open_vSwitch . external-ids:ovn-bridge-mappings=provider:br-ex
+        #
+        # Configuring the chassis gateway to the ovn-central hypervisor
+        #
+        /usr/bin/ovn-nbctl lrp-set-gateway-chassis lr0-public {{ kubeinit_ovn_central_host }}
+        /usr/bin/ovn-nbctl \
+          --id=@gc0 create Gateway_Chassis name=lr0-public chassis_name={{ kubeinit_ovn_central_host }} priority=20 -- \
+          set Logical_Router_Port lr0-public 'gateway_chassis=[@gc0]'
+        /usr/bin/ovn-nbctl set logical_router_port lr0-public options:redirect-chassis={{ kubeinit_ovn_central_host }}
+        #
+        # Create an ovs br-ex bridge to connect to the host
+        #
+        /usr/bin/ovs-vsctl --may-exist add-br br-ex
+        ip addr add 172.16.0.254/24 dev br-ex
+        ip link set br-ex up
+        #
+        # Routes
+        #
+        # Connectivity to external/additional networks
+        /usr/bin/ovn-nbctl lr-route-add lr0 0.0.0.0/0 172.16.0.254
+        #
+        # Disable rp_filter
+        #
+        sysctl net.ipv4.conf.all.rp_filter=2
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+      when: kubeinit_destroy_ovn_network
+
+    - name: Wait for changes to propagate
+      ansible.builtin.command: |
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 sync
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Attach our cluster network to the logical router
+      ansible.builtin.shell: |
+        #
+        # Create a logical router to connect the VMs switch
+        #
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 lrp-add lr0 lr0-sw-{{ kubeinit_cluster_name }} {{ '00:00:00' | community.general.random_mac }} {{ kubeinit_cluster_gateway }}/{{ kubeinit_cluster_prefix }}
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 lsp-add sw-{{ kubeinit_cluster_name }} sw-{{ kubeinit_cluster_name }}-lr0
+        /usr/bin/ovn-nbctl lsp-set-type sw-{{ kubeinit_cluster_name }}-lr0 router
+        /usr/bin/ovn-nbctl lsp-set-addresses sw-{{ kubeinit_cluster_name }}-lr0 router
+        /usr/bin/ovn-nbctl lsp-set-options sw-{{ kubeinit_cluster_name }}-lr0 router-port=lr0-sw-{{ kubeinit_cluster_name }}
+        #
+        # Routes
+        #
+        # Connectivity from the host to the guest machines
+        ip route add {{ kubeinit_cluster_network }} via 172.16.0.1 dev br-ex
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Wait for changes to propagate
+      ansible.builtin.command: |
+        /usr/bin/ovn-nbctl --wait=hv --wait=sb --timeout=30 sync
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    #
+    # The NAT rules are mandatory to allow guests to have external connectivity
+    # there might be cases where they are not needed, but this change needs testing
+    # ----------- THESE ARE REQUIRED AT LEAST IN DEBIAN AND FEDORA CHASSIS -----------
+    #
+    - name: Configuring NAT
+      ansible.builtin.shell: |
+        set -eo pipefail
+        #
+        # NAT from the external interface
+        #
+        # Get the external interface name
+        iface=$(ip route get "8.8.8.8" | grep -Po '(?<=(dev )).*(?= src| proto)')
+        #
+        iptables -t nat -A POSTROUTING -s {{ kubeinit_cluster_network }} -o $iface -j MASQUERADE
+        #
+        iptables -A FORWARD -i $iface -j ACCEPT
+        iptables -A FORWARD -i br-ex -j ACCEPT
+        iptables -A FORWARD -o $iface -j ACCEPT
+        iptables -A FORWARD -o br-ex -j ACCEPT
+        #
+        iptables -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+        #
+        iptables -P FORWARD ACCEPT
+        iptables -P INPUT ACCEPT
+        iptables -P OUTPUT ACCEPT
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+      when: not hostvars[kubeinit_ovn_central_host].firewalld_is_active
+
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+
+#
+# Define libvirt common resources and networks
+#
+- name: Render KubeInit networks for debugging
+  ansible.builtin.template:
+    src: cluster-net.xml.j2
+    dest: "{{ kubeinit_libvirt_hypervisor_tmp_dir }}/cluster-net.xml"
+    mode: '0644'
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+
+- name: Define KubeInit networks
+  community.libvirt.virt_net:
+    command: define
+    name: "{{ kubeinit_cluster_network_name }}"
+    xml: '{{ lookup("template", "cluster-net.xml.j2") }}'
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+
+- name: Activate KubeInit networks
+  community.libvirt.virt_net:
+    state: active
+    name: "{{ kubeinit_cluster_network_name }}"
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+
+- name: Autostart KubeInit networks
+  community.libvirt.virt_net:
+    autostart: yes
+    name: "{{ kubeinit_cluster_network_name }}"
+  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop_control:
+    loop_var: ovn_host
+  delegate_to: "{{ ovn_host }}"
+
+- name: Show northbound status
+  ansible.builtin.command: /usr/bin/ovn-nbctl show
+  register: _result
+  changed_when: "_result.rc == 0"
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+
+- name: Show southbound status
+  ansible.builtin.command: /usr/bin/ovn-sbctl show
+  register: _result
+  changed_when: "_result.rc == 0"
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
+
+- name: Show openvswitch status
+  ansible.builtin.command: /usr/bin/ovs-vsctl show
+  register: _result
+  changed_when: "_result.rc == 0"
+  delegate_to: "{{ kubeinit_ovn_central_host }}"
