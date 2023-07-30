@@ -1,0 +1,50 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set kubeinit_cluster_ssh_config fact
+  ansible.builtin.set_fact:
+    kubeinit_cluster_ssh_config: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh/' + kubeinit_cluster_name + '_config' }}"
+    kubeinit_cluster_keypair_path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh/kubeinit_id_' + hostvars['kubeinit-facts'].ssh_keytype }}"
+
+- name: Add ansible_ssh_extra_args to kubeinit_hypervisors group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    groups: 'kubeinit_hypervisors'
+    ansible_ssh_extra_args: "-i {{ kubeinit_cluster_keypair_path }} -F {{ kubeinit_cluster_ssh_config }}"
+  loop: "{{ groups['kubeinit_hypervisors'] }}"
+
+- name: Copy ssh key secret into ~/.ssh
+  ansible.builtin.copy:
+    content: "{{ lookup('unvault', hostvars['kubeinit-secrets'].secrets['kubeinit-ssh-key']) }}"
+    dest: "~/.ssh/kubeinit_id_{{ hostvars['kubeinit-facts'].ssh_keytype }}"
+    mode: '0600'
+  when: hostvars['kubeinit-facts'].container_run|bool
+
+- name: Check if kubeinit ssh config exists
+  ansible.builtin.stat:
+    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh/kubeinit_config' }}"
+  register: _result_kubeinit_ssh_config_stat
+
+- name: Check if ssh config exists
+  ansible.builtin.stat:
+    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh/config' }}"
+  register: _result_ssh_config_stat
+  when: not _result_kubeinit_ssh_config_stat.stat.exists
+
+- name: Set kubeinit_cluster_ssh_include_paths
+  ansible.builtin.set_fact:
+    kubeinit_cluster_ssh_include_paths:
+      "{{ [_result_kubeinit_ssh_config_stat.stat.path] if (_result_kubeinit_ssh_config_stat.stat.exists) else [_result_ssh_config_stat.stat.path] if (_result_ssh_config_stat.stat.exists) else [] }}"

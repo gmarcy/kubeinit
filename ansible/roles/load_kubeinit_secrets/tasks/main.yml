@@ -1,0 +1,91 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Set kubeinit_secrets_hostvars
+  ansible.builtin.set_fact:
+    kubeinit_secrets_hostvars: "{{ hostvars['kubeinit-secrets'] }}"
+    _secrets: []
+  no_log: "{{ hostvars['kubeinit-secrets'].tasks_hidden }}"
+
+- name: If running from the container we read secrets from podman run secrets
+  block:
+
+    - name: Collect requested secrets from container
+      ansible.builtin.set_fact:
+        _secrets: "{{ _secrets | union([item | combine({'secret_path': _secret_path})]) }}"
+      loop: "{{ kubeinit_secrets_hostvars.kubeinit_secrets }}"
+      vars:
+        _secret_path: "{{ '/run/secrets/' + item.secret_name }}"
+      when: item.secret_name in secret_names
+
+  no_log: "{{ kubeinit_secrets_hostvars.tasks_hidden }}"
+  when: hostvars['kubeinit-facts'].container_run|bool
+
+- name: If not running from the container we read secrets from paths set in environment variables
+  block:
+
+    - name: Collect requested secrets from environment
+      ansible.builtin.set_fact:
+        _secrets: "{{ _secrets | union([item | combine({'secret_path': _secret_path})]) }}"
+      loop: "{{ kubeinit_secrets_hostvars.kubeinit_secrets }}"
+      vars:
+        _secret_path: "{{ lookup('env', item.envvar_name) }}"
+      when: item.secret_name in secret_names and lookup('env',item.envvar_name) | default('') | length > 0
+
+  no_log: "{{ kubeinit_secrets_hostvars.tasks_hidden }}"
+  when: not hostvars['kubeinit-facts'].container_run|bool
+
+- name: Check for secret files
+  ansible.builtin.stat:
+    path: "{{ secret['secret_path'] }}"
+  register: _result_secret_stat
+  loop: "{{ _secrets }}"
+  loop_control:
+    loop_var: secret
+  no_log: "{{ kubeinit_secrets_hostvars.tasks_hidden }}"
+  when: secret['secret_path'] | default('') | length > 0
+
+- name: Put secret paths into a dictionary
+  ansible.builtin.set_fact:
+    _kubeinit_secrets: "{{ _kubeinit_secrets | default({}) | combine({_key: _val}) }}"
+  register: _result_secret_values
+  loop: "{{ _result_secret_stat.results }}"
+  loop_control:
+    loop_var: path
+  vars:
+    _key: "{{ path.secret.secret_name }}"
+    _val: "{{ path.stat.path }}"
+  no_log: "{{ kubeinit_secrets_hostvars.tasks_hidden }}"
+  when: path.stat.exists | default(false)
+
+- name: Add secrets to kubeinit secrets
+  ansible.builtin.add_host:
+    name: 'kubeinit-secrets'
+    secrets: "{{ hostvars['kubeinit-secrets'].secrets | combine(_kubeinit_secrets) }}"
+  no_log: "{{ kubeinit_secrets_hostvars.tasks_hidden }}"
+  when: _kubeinit_secrets is defined
+
+- name: Clear facts
+  ansible.builtin.set_fact:
+    _secrets: []
+    _result_secret_stat: {}
+    _result_secret_values: {}
+    _kubeinit_secrets: {}
+  no_log: "{{ kubeinit_secrets_hostvars.tasks_hidden }}"
+
+- name: Clear kubeinit_secrets_hostvars
+  ansible.builtin.set_fact:
+    kubeinit_secrets_hostvars: {}
