@@ -1,0 +1,41 @@
+/* This file is rendered using a template from a KubeInit role */
+/* This file will be overriden each time the playbook runs */
+/* No not edit directly */
+/* More information at: https://github.com/kubeinit/kubeinit */
+
+options {
+    listen-on port 53 { 127.0.0.1; {{ kubeinit_bind_service_address }}; };
+
+    directory "/var/cache/bind";
+
+    allow-query        { localhost; {{ kubeinit_bind_service_address | ipsubnet(24) }}; };
+
+    recursion yes;
+    allow-recursion { any; };
+
+    forwarders {
+      {{ kubeinit_dns_public }};
+      8.8.8.8;
+    };
+
+    dnssec-validation auto;
+    listen-on-v6 { none; };
+
+    /* Path to ISC DLV key */
+    /* Use the defaults */
+    /* bindkeys-file "/etc/named.root.key"; */
+    /* managed-keys-directory "/var/bind/dynamic"; */
+    /* pid-file "/run/named/named.pid"; */
+    /* session-keyfile "/run/named/session.key"; */
+};
+
+/* logging { */
+/*   channel default_debug { */
+/*     file "data/named.run"; */
+/*     severity dynamic; */
+/*   }; */
+/* }; */
+
+include "/etc/bind/bind.keys";
+
+include "/etc/bind/kubeinit/named.conf.local";

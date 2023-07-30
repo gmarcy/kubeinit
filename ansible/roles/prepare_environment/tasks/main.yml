@@ -1,0 +1,405 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Define kubeinit_facts_hostvars
+  ansible.builtin.set_fact:
+    kubeinit_facts_hostvars: "{{ hostvars['kubeinit-facts'] }}"
+
+#
+# Setup bastion_host group
+#
+- name: Parse bastion_host_spec into a dictionary if defined
+  ansible.builtin.set_fact:
+    bastion_host_map: "{{ bastion_host_spec | from_yaml }}"
+  when: bastion_host_spec is defined
+
+- name: Assert bastion_host group and bastion_host_spec have same name when both defined
+  ansible.builtin.assert:
+    msg: "Cluster bastion host from inventory and command-line specification must match."
+    that: bastion_host_map['host'] == groups['bastion_host'][0]
+  when: bastion_host_map['host'] | default('') | length > 0 and groups['bastion_host'][0] | default('') | length > 0
+
+- name: Define kubeinit_bastion_host_name
+  ansible.builtin.set_fact:
+    kubeinit_bastion_host_name: "{{ groups['bastion_host'][0] | default(bastion_host_map['host']) | default('bastion') }}"
+
+- name: Assert bastion_host group does not have both target and ansible_host keys
+  ansible.builtin.assert:
+    msg: "The bastion_host group cannot have both target and ansible_host keys."
+    that: hostvars[kubeinit_bastion_host_name]['target'] is not defined or hostvars[kubeinit_bastion_host_name]['ansible_host'] is not defined
+  when: hostvars[kubeinit_bastion_host_name] is defined
+
+- name: Define default bastion target and ansible_host from group target
+  ansible.builtin.set_fact:
+    default_bastion_target: "{{ hostvars[kubeinit_bastion_host_name].target }}"
+    default_ansible_host: "{{ hostvars[hostvars[kubeinit_bastion_host_name].target].ansible_host }}"
+  when: hostvars[kubeinit_bastion_host_name].target | default('') | length > 0
+
+- name: Define default bastion target and ansible_host from group ansible_host
+  ansible.builtin.set_fact:
+    default_bastion_target: "{{ kubeinit_bastion_host_name }}"
+    default_ansible_host: "{{ hostvars[kubeinit_bastion_host_name].ansible_host }}"
+  when: hostvars[kubeinit_bastion_host_name].ansible_host | default('') | length > 0
+
+- name: Assert bastion_host_spec does not have both target and ansible_host keys
+  ansible.builtin.assert:
+    msg: "The bastion_host_spec cannot have both target and ansible_host keys."
+    that: bastion_host_map['target'] is not defined or bastion_host_map['ansible_host'] is not defined
+  when: bastion_host_map is defined
+
+- name: Define default bastion target and ansible_host from spec target
+  ansible.builtin.set_fact:
+    default_bastion_target: "{{ bastion_host_map['target'] }}"
+    default_ansible_host: "{{ hostvars[bastion_host_map['target']].ansible_host }}"
+  when: bastion_host_map['target'] | default('') | length > 0
+
+- name: Define default bastion target and ansible_host from spec ansible_host
+  ansible.builtin.set_fact:
+    default_bastion_target: "{{ kubeinit_bastion_host_name }}"
+    default_ansible_host: "{{ bastion_host_map['ansible_host'] }}"
+  when: bastion_host_map['ansible_host'] | default('') | length > 0
+
+- name: Use the first hypervisor if neither bastion host spec or group defines a target or ansible_host
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_bastion_host_name }}"
+    group: 'bastion_host'
+    target: "{{ default_bastion_target | default(groups['kubeinit_hypervisors'] | first) }}"
+    ansible_host: "{{ default_ansible_host | default(hostvars[groups['kubeinit_hypervisors'] | first].ansible_host) }}"
+
+#
+# Setup ovn_central_host group
+#
+- name: Parse ovn_central_host_spec into a dictionary if defined
+  ansible.builtin.set_fact:
+    ovn_central_host_map: "{{ ovn_central_host_spec | from_yaml }}"
+  when: ovn_central_host_spec is defined
+
+- name: Assert ovn_central_host group and ovn_central_host_spec have same name when both defined
+  ansible.builtin.assert:
+    msg: "Cluster ovn-central host from inventory and command-line specification must match."
+    that: ovn_central_host_map['host'] == groups['ovn_central_host'][0]
+  when: ovn_central_host_map['host'] | default('') | length > 0 and groups['ovn_central_host'][0] | default('') | length > 0
+
+- name: Define kubeinit_ovn_central_host_name
+  ansible.builtin.set_fact:
+    kubeinit_ovn_central_host_name: "{{ groups['ovn_central_host'][0] | default(ovn_central_host_map['host']) | default('ovn-central') }}"
+
+- name: Define default ovn-central target and ansible_host from group target
+  ansible.builtin.set_fact:
+    default_ovn_central_target: "{{ hostvars[kubeinit_ovn_central_host_name].target }}"
+  when: hostvars[kubeinit_ovn_central_host_name].target | default('') | length > 0
+
+- name: Define default ovn-central target and ansible_host from spec target
+  ansible.builtin.set_fact:
+    default_ovn_central_target: "{{ ovn_central_host_map['target'] }}"
+  when: ovn_central_host_map['target'] | default('') | length > 0
+
+- name: Use the first hypervisor if neither ovn-central host spec or group defines a target
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_ovn_central_host_name }}"
+    group: 'ovn_central_host'
+    target: "{{ default_ovn_central_target | default(groups['kubeinit_hypervisors'] | first) }}"
+
+- name: Add ansible_host for ovn_central_host
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_ovn_central_host_name }}"
+    group: 'ovn_central_host'
+    ansible_host: "{{ hostvars[hostvars[kubeinit_ovn_central_host_name].target].ansible_host }}"
+
+#
+# Define additional groups we will use
+#
+- name: Add all controller nodes to the all_controller_nodes group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    guest_name: "{{ kubeinit_cluster_name }}-{{ item }}"
+    group: all_controller_nodes
+    fqdn: "{{ item }}.{{ kubeinit_cluster_fqdn }}"
+    target: "{{ hostvars[item].target }}"
+    os: "{{ hostvars[item].os }}"
+  loop: "{{ groups['controller_nodes'][0:hostvars[kubeinit_cluster_name].controller_count|int] | default([]) | list }}"
+
+- name: Add all compute nodes to the all_compute_nodes group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    guest_name: "{{ kubeinit_cluster_name }}-{{ item }}"
+    group: all_compute_nodes
+    fqdn: "{{ item }}.{{ kubeinit_cluster_fqdn }}"
+    target: "{{ hostvars[item].target }}"
+    os: "{{ hostvars[item].os }}"
+  loop: "{{ groups['compute_nodes'][0:hostvars[kubeinit_cluster_name].compute_count|int] | default([]) | list }}"
+
+- name: Add all controller and compute nodes to the all_cluster_nodes group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    group: all_cluster_nodes
+    fqdn: "{{ hostvars[item].fqdn }}"
+    target: "{{ hostvars[item].target }}"
+    os: "{{ hostvars[item].os }}"
+  loop: "{{ groups['all_controller_nodes'] + groups['all_compute_nodes'] | default([]) }}"
+
+- name: Add any extra cluster vm guest nodes to the all_extra_nodes group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    guest_name: "{{ kubeinit_cluster_name }}-{{ item }}"
+    group: all_extra_nodes
+    fqdn: "{{ item }}.{{ kubeinit_cluster_fqdn }}"
+    target: "{{ hostvars[item].target }}"
+    os: "{{ hostvars[item].os }}"
+    ram: "{{ hostvars[item].ram }}"
+  loop: "{{ groups['extra_nodes'] | default([]) | list }}"
+  when: kubeinit_cluster_distro in hostvars[item].when_distro
+
+- name: Collect all cluster node hypervisors
+  ansible.builtin.set_fact:
+    all_cluster_hypervisors: "{{ all_cluster_hypervisors | default([]) | union([hostvars[item].target]) }}"
+  loop: "{{ groups['all_cluster_nodes'] + (groups['all_extra_nodes'] | default([])) }}"
+
+- name: Show the before and after values of the hypervisors fact
+  ansible.builtin.debug:
+    msg: "{{ groups['kubeinit_hypervisors'] }} ==> {{ all_cluster_hypervisors }}"
+
+# TODO: check later to see if this would be a useful optimization
+# - name: Set all cluster hypervisors fact
+#   ansible.builtin.add_host:
+#     name: "{{ kubeinit_cluster_name }}"
+#     hypervisors: "{{ all_cluster_hypervisors }}"
+
+- name: Add all service nodes to the all_service_nodes group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    guest_name: "{{ kubeinit_cluster_name }}-{{ item }}"
+    group: all_service_nodes
+    fqdn: "{{ item }}.{{ kubeinit_cluster_fqdn }}"
+    services: "{{ hostvars[item].services }}"
+    target: "{{ hostvars[item].target }}"
+    os: "{{ hostvars[item].os }}"
+    type: container
+    container_host: "{{ hostvars[item].target }}"
+  loop: "{{ groups['service_nodes'] | default([]) | list }}"
+
+- name: Create tuples for each service and each service node providing that service
+  ansible.builtin.set_fact:
+    cluster_services: "{{ (cluster_services | default([])) + (item[0] | product([item[1]])) }}"
+  loop: "{{ groups['all_service_nodes'] | map('extract', hostvars, 'services') | zip(groups['all_service_nodes']) }}"
+
+- name: Combine those tuples into dict of services and nodes providing that service
+  ansible.builtin.set_fact:
+    cluster_services_dict: "{{ (cluster_services_dict | default({})) | combine({item[0]: cluster_services_dict[item[0]] | default([]) + [item[1]]}) }}"
+  loop: "{{ cluster_services }}"
+
+- name: Check for any services being provided on more than one service node
+  ansible.builtin.fail:
+    msg:
+      "You are not currently permitted to run the same service on more than one service node."
+  loop: "{{ cluster_services_dict | dict2items }}"
+  when: item.value | length > 1
+
+- name: Use first service node if there is no assigned provision service node
+  ansible.builtin.set_fact:
+    cluster_services_dict: "{{ cluster_services_dict | combine({'provision': [groups['all_service_nodes'][0]]}) }}"
+  when: "'provision' not in cluster_services_dict"
+
+- name: Flatten dictionary values into final form
+  ansible.builtin.set_fact:
+    all_cluster_services: "{{ (all_cluster_services | default({})) | combine({item.key: item.value[0]}) }}"
+  loop: "{{ cluster_services_dict | dict2items | flatten }}"
+
+- name: Set fact for cluster nameserver
+  ansible.builtin.set_fact:
+    kubeinit_cluster_nameserver: "{{ hostvars[all_cluster_services['bind']].ansible_host }}"
+  when: "'bind' in all_cluster_services"
+
+- name: Set all services cluster fact
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_cluster_name }}"
+    nameserver: "{{ kubeinit_cluster_nameserver | default(omit) }}"
+    services: "{{ all_cluster_services }}"
+
+- name: Add all service and cluster nodes to the all_nodes group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    group: all_nodes
+    fqdn: "{{ hostvars[item].fqdn }}"
+    os: "{{ hostvars[item].os }}"
+  loop: "{{ groups['all_service_nodes'] + groups['all_cluster_nodes'] + (groups['all_extra_nodes'] | default([])) }}"
+
+- name: Add all cluster hypervisors to the all_hosts group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    group: all_hosts
+  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  when: >
+    item in hostvars[kubeinit_ovn_central_host_name].target or
+    item in groups['kubeinit_hypervisors']
+
+- name: Add all hosts to the all_ovn_hosts group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    group: all_ovn_hosts
+  loop: "{{ groups['all_hosts'] }}"
+
+- name: Collect all of the localhost and hypervisor authorized keys into authorized_keys list
+  ansible.builtin.set_fact:
+    all_authorized_keys: "{{ (all_authorized_keys | default([])) | union([hostvars[item].authorized_key]) }}"
+  loop: "{{ ['localhost'] | union(groups['all_hosts']) }}"
+
+- name: Set all hypervisor authorized keys cluster fact
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_cluster_name }}"
+    authorized_keys: "{{ all_authorized_keys }}"
+
+- name: Add services guest and cluster nodes to the all_guest_vms group
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    group: all_guest_vms
+  loop: "{{ groups['all_cluster_nodes'] + (groups['all_extra_nodes'] | default([])) }}"
+  when: hostvars[item].type == 'virtual'
+
+- name: Collect all of the node aliases
+  ansible.builtin.set_fact:
+    all_node_aliases: "{{ (all_node_aliases | default([])) + ([item[0]] | product(item) | list) }}"
+  loop: "{{ groups['all_nodes'] | zip(groups['all_nodes'] | map('extract', hostvars, 'fqdn'), groups['all_nodes'] | map('extract', hostvars, 'ansible_host')) }}"
+
+- name: Set all node aliases cluster fact
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_cluster_name }}"
+    node_aliases: "{{ all_node_aliases }}"
+
+- name: Define group facts
+  ansible.builtin.set_fact:
+    kubeinit_bastion_host: "{{ hostvars[kubeinit_bastion_host_name].target }}"
+    kubeinit_ovn_central_host: "{{ hostvars[kubeinit_ovn_central_host_name].target }}"
+    kubeinit_first_controller_node: "{{ groups['all_controller_nodes'][0] }}"
+    kubeinit_hypervisor_count: "{{ groups['kubeinit_hypervisors'] | length }}"
+    kubeinit_controller_count: "{{ groups['all_controller_nodes'] | length }}"
+    kubeinit_compute_count: "{{ groups['all_compute_nodes'] | default([]) | length }}"
+    kubeinit_cluster_node_count: "{{ groups['all_cluster_nodes'] | default([]) | length }}"
+  loop: "{{ ['localhost'] | union(groups['kubeinit_hypervisors']) }}"
+  delegate_to: "{{ item }}"
+
+- name: Install podman if required
+  ansible.builtin.package:
+    state: present
+    name: "podman"
+  when: not hostvars['localhost'].podman_is_installed
+
+- name: Define service node facts
+  ansible.builtin.set_fact:
+    kubeinit_apache_service_name: "{{ kubeinit_cluster_name }}-apache"
+    kubeinit_bind_service_name: "{{ kubeinit_cluster_name }}-bind"
+    kubeinit_dnsmasq_service_name: "{{ kubeinit_cluster_name }}-dnsmasq"
+    kubeinit_haproxy_service_name: "{{ kubeinit_cluster_name }}-haproxy"
+    kubeinit_nexus_service_name: "{{ kubeinit_cluster_name }}-nexus"
+    kubeinit_provision_service_name: "{{ kubeinit_cluster_name }}-provision"
+    kubeinit_registry_service_name: "{{ kubeinit_cluster_name }}-registry"
+    kubeinit_apache_service_node: "{{ hostvars[kubeinit_cluster_name].services['apache'] | default(None) }}"
+    kubeinit_bind_service_node: "{{ hostvars[kubeinit_cluster_name].services['bind'] | default(None) }}"
+    kubeinit_dnsmasq_service_node: "{{ hostvars[kubeinit_cluster_name].services['dnsmasq'] | default(None) }}"
+    kubeinit_haproxy_service_node: "{{ hostvars[kubeinit_cluster_name].services['haproxy'] | default(None) }}"
+    kubeinit_nexus_service_node: "{{ hostvars[kubeinit_cluster_name].services['nexus'] | default(None) }}"
+    kubeinit_provision_service_node: "{{ hostvars[kubeinit_cluster_name].services['provision'] }}"
+    kubeinit_registry_service_node: "{{ hostvars[kubeinit_cluster_name].services['registry'] | default(None) }}"
+  loop: "{{ ['localhost'] | union(groups['kubeinit_hypervisors']) }}"
+  delegate_to: "{{ item }}"
+
+- name: Define provision_service_node group
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_provision_service_node }}"
+    group: 'provision_service_node'
+
+- name: Gather facts from bastion host if it is not a hypervisor host
+  block:
+
+    - name: Gather hosts facts and omit from the documentation grapher
+      block:
+        - name: Gather facts from bastion_host if needed
+          ansible.builtin.include_role:
+            name: kubeinit.kubeinit.kubeinit_libvirt
+            tasks_from: gather_host_facts.yml
+            public: true
+          vars:
+            _param_gather_host: "{{ kubeinit_bastion_host }}"
+      tags: omit_from_grapher
+
+    - name: Generate an OpenSSH keypair bastion host
+      community.crypto.openssh_keypair:
+        path: "~/.ssh/{{ kubeinit_cluster_name }}_id_{{ kubeinit_ssh_keytype }}"
+        type: "{{ kubeinit_ssh_keytype }}"
+        comment: "{{ kubeinit_cluster_name }} {{ kubeinit_bastion_host }}"
+        regenerate: 'never'
+      register: _result_bastion_keypair
+      delegate_to: "{{ kubeinit_bastion_host }}"
+
+    - name: Set authorized_key hostvar for bastion host
+      ansible.builtin.add_host:
+        name: "{{ kubeinit_bastion_host }}"
+        authorized_key: "{{ _result_bastion_keypair.public_key + ' ' + _result_bastion_keypair.comment }}"
+
+    - name: Add bastion host authorized key to cluster authorized_keys
+      ansible.builtin.set_fact:
+        authorized_keys_with_bastion: "{{ hostvars[kubeinit_cluster_name].authorized_keys | union([hostvars[kubeinit_bastion_host].authorized_key]) }}"
+
+    - name: Set all cluster hypervisors fact
+      ansible.builtin.add_host:
+        name: "{{ kubeinit_cluster_name }}"
+        authorized_keys: "{{ authorized_keys_with_bastion }}"
+
+  when: kubeinit_bastion_host not in groups['all_hosts']
+
+- name: Add all cluster authorized keys to all hypervisors
+  ansible.posix.authorized_key:
+    user: root
+    key: "{{ _key }}"
+    state: present
+  loop: "{{ groups['all_hosts'] | product(hostvars[kubeinit_cluster_name].authorized_keys) | list }}"
+  vars:
+    _host: "{{ item[0] }}"
+    _key: "{{ item[1] }}"
+  delegate_to: "{{ _host }}"
+
+- name: Define additional host, node and services facts
+  ansible.builtin.set_fact:
+    kubeinit_bastion_host_address: "{{ hostvars[kubeinit_bastion_host].ssh_connection_address }}"
+    kubeinit_apache_service_address: "{{ hostvars[kubeinit_apache_service_node].ansible_host | default(None) }}"
+    kubeinit_bind_service_address: "{{ hostvars[kubeinit_bind_service_node].ansible_host | default(None) }}"
+    kubeinit_dnsmasq_service_address: "{{ hostvars[kubeinit_dnsmasq_service_node].ansible_host | default(None) }}"
+    kubeinit_haproxy_service_address: "{{ hostvars[kubeinit_haproxy_service_node].ansible_host | default(None) }}"
+    kubeinit_nexus_service_address: "{{ hostvars[kubeinit_nexus_service_node].ansible_host | default(None) }}"
+    kubeinit_provision_service_address: "{{ hostvars[kubeinit_provision_service_node].ansible_host }}"
+    kubeinit_registry_service_address: "{{ hostvars[kubeinit_registry_service_node].ansible_host | default(None) }}"
+    kubeinit_service_user: "root"
+    kubeinit_service_user_dir: "/root"
+    kubeinit_ingress_hostname: "ingress"
+    kubeinit_bind_volume_name: "{{ kubeinit_bind_service_name }}-config"
+    kubeinit_nexus_port: "5001"
+    kubeinit_nexus_fqdn: "{{ kubeinit_nexus_service_node }}.{{ kubeinit_cluster_fqdn }}"
+    kubeinit_nexus_fqdn_alt: "nexus.{{ kubeinit_cluster_fqdn }}"
+    kubeinit_nexus_uri: "{{ kubeinit_nexus_service_node }}.{{ kubeinit_cluster_fqdn }}:5001"
+    kubeinit_registry_port: "5000"
+    kubeinit_registry_fqdn: "{{ kubeinit_registry_service_node }}.{{ kubeinit_cluster_fqdn }}"
+    kubeinit_registry_fqdn_alt: "registry.{{ kubeinit_cluster_fqdn }}"
+    kubeinit_registry_uri: "{{ kubeinit_registry_service_node }}.{{ kubeinit_cluster_fqdn }}:5000"
+    kubeinit_services_data_volume: "{{ kubeinit_cluster_name }}-data"
+  loop: "{{ ['localhost'] | union(groups['kubeinit_hypervisors']) }}"
+  delegate_to: "{{ item }}"
+
+- name: Add ssh ProxyCommand option for all nodes
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    ansible_ssh_common_args: >-
+      {{ ansible_ssh_common_args }} -i ~/.ssh/{{ kubeinit_cluster_name }}_id_{{ kubeinit_ssh_keytype }} -o ProxyCommand="ssh {{ ansible_ssh_common_args }} -i ~/.ssh/{{ kubeinit_cluster_name }}_id_{{ kubeinit_ssh_keytype }} -W %h:%p -q root@{{ hostvars[kubeinit_ovn_central_host].ssh_connection_address }}"
+  loop: "{{ groups['all_nodes'] }}"
