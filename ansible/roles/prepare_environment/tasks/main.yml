@@ -14,10 +14,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Define kubeinit_facts_hostvars
-  ansible.builtin.set_fact:
-    kubeinit_facts_hostvars: "{{ hostvars['kubeinit-facts'] }}"
-
 #
 # Setup bastion_host group
 #
@@ -328,11 +324,10 @@
       block:
         - name: Gather facts from bastion_host if needed
           ansible.builtin.include_role:
-            name: kubeinit.kubeinit.kubeinit_libvirt
-            tasks_from: gather_host_facts.yml
+            name: kubeinit.ansible.gather_host_facts
             public: true
           vars:
-            _param_gather_host: "{{ kubeinit_bastion_host }}"
+            gather_host: "{{ kubeinit_bastion_host }}"
       tags: omit_from_grapher
 
     - name: Generate an OpenSSH keypair bastion host
@@ -373,7 +368,6 @@
 
 - name: Define additional host, node and services facts
   ansible.builtin.set_fact:
-    kubeinit_bastion_host_address: "{{ hostvars[kubeinit_bastion_host].ssh_connection_address }}"
     kubeinit_apache_service_address: "{{ hostvars[kubeinit_apache_service_node].ansible_host | default(None) }}"
     kubeinit_bind_service_address: "{{ hostvars[kubeinit_bind_service_node].ansible_host | default(None) }}"
     kubeinit_dnsmasq_service_address: "{{ hostvars[kubeinit_dnsmasq_service_node].ansible_host | default(None) }}"

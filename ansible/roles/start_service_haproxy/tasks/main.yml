@@ -92,7 +92,7 @@
 
 - name: Create systemd service for podman container
   ansible.builtin.include_role:
-    name: create_managed_service
+    name: kubeinit.ansible.create_managed_service
     public: true
   vars:
     _param_service_user_dir: "{{ kubeinit_service_user_dir }}"

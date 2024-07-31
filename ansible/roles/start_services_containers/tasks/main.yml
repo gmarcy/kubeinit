@@ -23,7 +23,7 @@
     #
     - name: Configure Bind
       ansible.builtin.include_role:
-        name: start_service_bind
+        name: kubeinit.ansible.start_service_bind
         public: true
       when: "'bind' in hostvars[inventory_hostname].services"
 
@@ -32,7 +32,7 @@
     #
     - name: Configure Dnsmasq
       ansible.builtin.include_role:
-        name: start_service_dnsmasq
+        name: kubeinit.ansible.start_service_dnsmasq
         public: true
       when: "'dnsmasq' in hostvars[inventory_hostname].services"
 
@@ -41,7 +41,7 @@
     #
     - name: Configure HAProxy
       ansible.builtin.include_role:
-        name: start_service_haproxy
+        name: kubeinit.ansible.start_service_haproxy
         public: true
       when: "'haproxy' in hostvars[inventory_hostname].services"
 
@@ -50,7 +50,7 @@
     #
     - name: Configure Apache
       ansible.builtin.include_role:
-        name: start_service_apache
+        name: kubeinit.ansible.start_service_apache
         public: true
       when: "'apache' in hostvars[inventory_hostname].services"
 
@@ -59,7 +59,7 @@
     #
     - name: Configure a local container image registry
       ansible.builtin.include_role:
-        name: start_service_registry
+        name: kubeinit.ansible.start_service_registry
         public: true
       when: "'registry' in hostvars[inventory_hostname].services"
 

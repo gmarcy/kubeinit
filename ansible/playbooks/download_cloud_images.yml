@@ -14,8 +14,19 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create .ssh folder if needed
-  ansible.builtin.file:
-    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh' }}"
-    state: directory
-    mode: '0700'
+- name: Download cloud images
+  hosts: localhost
+  become: false
+  gather_facts: false
+  tags: tag_download_images
+  roles:
+  - role: kubeinit.ansible.check_playbook_terminated
+  tasks:
+    - name: Download cloud images
+      tags: task_download_images
+      block:
+        - name: task-download-images
+          ansible.builtin.include_role:
+            name: kubeinit.kubeinit.kubeinit_libvirt
+            tasks_from: download_cloud_images.yml
+            public: true

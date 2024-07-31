@@ -20,7 +20,7 @@
 
     - name: Prepare podman
       ansible.builtin.include_role:
-        name: prepare_podman
+        name: kubeinit.ansible.prepare_podman
         public: true
       vars:
         _param_install_dependencies: true

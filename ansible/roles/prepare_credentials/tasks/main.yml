@@ -201,10 +201,6 @@
         name: "{{ kubeinit_cluster_name }}"
         domain_cert: "{{ _result_domain_cert_b64.content | string | b64decode }}"
 
-    - name: Update kubeinit_cluster_hostvars
-      ansible.builtin.set_fact:
-        kubeinit_cluster_hostvars: "{{ hostvars[kubeinit_cluster_name] }}"
-
   vars:
     ansible_ssh_pipelining: False
   delegate_to: "{{ kubeinit_cluster_name }}-credentials"

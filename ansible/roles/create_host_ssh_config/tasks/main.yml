@@ -44,8 +44,7 @@
 #
 # examples: |-
 #   - include_role:
-#       name: kubeinit.kubeinit.kubeinit_prepare
-#       tasks_from: create_host_ssh_config
+#       name: kubeinit.ansible.create_host_ssh_config
 #     vars:
 #       ssh_hosts: "{{ groups['kubeinit_hypervisors'] }}"
 #       keypair_path: "{{ kubeinit_cluster_keypair_path }}"

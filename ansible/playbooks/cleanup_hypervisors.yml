@@ -14,8 +14,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create .ssh folder if needed
-  ansible.builtin.file:
-    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh' }}"
-    state: directory
-    mode: '0700'
+- name: Cleanup hypervisors
+  hosts: localhost
+  become: false
+  gather_facts: false
+  tags: tag_cleanup_hypervisors
+  roles:
+  - role: kubeinit.ansible.check_playbook_terminated
+  - role: kubeinit.ansible.check_stop_before
+    task_to_check: task-cleanup-hypervisors
+  - role: kubeinit.ansible.cleanup_hypervisors
+  - role: kubeinit.ansible.cleanup_libvirt
+  - role: kubeinit.ansible.check_stop_after
+    task_to_check: task-cleanup-hypervisors

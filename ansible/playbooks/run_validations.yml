@@ -14,8 +14,17 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create .ssh folder if needed
-  ansible.builtin.file:
-    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh' }}"
-    state: directory
-    mode: '0700'
+- name: Run validations on cluster resources
+  hosts: localhost
+  become: false
+  gather_facts: false
+  tags: tag_run_validations
+  roles:
+  - role: kubeinit.ansible.check_playbook_terminated
+  - role: kubeinit.ansible.check_stop_before
+    task_to_check: task-run-validations
+  - role: kubeinit.ansible.validate_free_space
+  - role: kubeinit.ansible.validate_available_memory
+  - role: kubeinit.ansible.validate_available_cpu
+  - role: kubeinit.ansible.check_stop_after
+    task_to_check: task-run-validations

@@ -14,8 +14,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create .ssh folder if needed
-  ansible.builtin.file:
-    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh' }}"
-    state: directory
-    mode: '0700'
+- import_playbook: kubeinit.ansible.check_ansible_version
+- import_playbook: kubeinit.ansible.setup_gather_facts
+- import_playbook: kubeinit.ansible.setup_prepare_environment
+- import_playbook: kubeinit.ansible.setup_cleanup_deployment
+- import_playbook: kubeinit.ansible.setup_deploy_environment
+- import_playbook: kubeinit.ansible.setup_hypervisor_hosts

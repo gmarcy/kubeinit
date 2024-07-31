@@ -1,0 +1,22 @@
+#
+# Kubeinit Ansible requirements
+#
+
+---
+collections:
+  - name: ansible.posix
+    version: '1.5.4'
+  - name: ansible.utils
+    version: '2.10.3'
+  - name: ansible.windows
+    version: '1.14.0'
+  - name: community.crypto
+    version: '2.13.1'
+  - name: community.general
+    version: '9.0.1'
+  - name: community.libvirt
+    version: '1.2.0'
+  - name: containers.podman
+    version: '1.15.1'
+  - name: openvswitch.openvswitch
+    version: '2.1.1'

@@ -14,16 +14,17 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- import_playbook: ../plays/build_hypervisors_group.yml
-- import_playbook: ../plays/gather_hypervisor_facts.yml
-- import_playbook: ../plays/gather_kubeinit_facts.yml
-- import_playbook: ../plays/prepare_hypervisors.yml
-- import_playbook: ../plays/prepare_environment.yml
-- import_playbook: ../plays/cleanup_hypervisors.yml
-- import_playbook: ../plays/run_validations.yml
-- import_playbook: ../plays/create_network.yml
-- import_playbook: ../plays/create_services.yml
-- import_playbook: ../plays/prepare_cluster.yml
-- import_playbook: ../plays/download_cloud_images.yml
-- import_playbook: ../plays/deploy_cluster.yml
-- import_playbook: ../plays/post_deployment.yml
+- import_playbook: kubeinit.ansible.check_ansible_version
+- import_playbook: kubeinit.ansible.build_hypervisors_group
+- import_playbook: kubeinit.ansible.gather_hypervisor_facts
+- import_playbook: kubeinit.ansible.gather_kubeinit_facts
+- import_playbook: kubeinit.ansible.prepare_hypervisors
+- import_playbook: kubeinit.ansible.prepare_environment
+- import_playbook: kubeinit.ansible.cleanup_hypervisors
+- import_playbook: kubeinit.ansible.run_validations
+- import_playbook: kubeinit.ansible.create_network
+- import_playbook: kubeinit.ansible.create_services
+- import_playbook: kubeinit.ansible.prepare_cluster
+- import_playbook: kubeinit.ansible.download_cloud_images
+- import_playbook: kubeinit.ansible.deploy_cluster
+- import_playbook: kubeinit.ansible.post_deployment

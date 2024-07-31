@@ -58,10 +58,6 @@
     _config: "{{ item[1] }}"
   when: _config['name'] | default(_host) == _host
 
-- name: Define kubeinit_facts_hostvars
-  ansible.builtin.set_fact:
-    kubeinit_facts_hostvars: "{{ hostvars['kubeinit-facts'] }}"
-
 - name: Define kubeinit_ssh_keytype
   ansible.builtin.set_fact:
     kubeinit_ssh_keytype: "{{ hostvars['kubeinit-env'].ssh_keytype }}"
@@ -125,7 +121,7 @@
   ansible.builtin.set_fact:
     kubeinit_libvirt_debian_release: "11"
     # It is possible to configure different versions of the OS depending on the distribution
-    # kubeinit_libvirt_ubuntu_release: "{{ 'focal' if (kubeinit_cluster_distro == 'cdk') else 'jammy' }}"
+    # kubeinit_libvirt_ubuntu_release: "{{ 'noble' if (kubeinit_cluster_distro == 'cdk') else 'jammy' }}"
     kubeinit_libvirt_ubuntu_release: "jammy"
 
 - name: Set registry authentication facts

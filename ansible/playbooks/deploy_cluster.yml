@@ -14,8 +14,19 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create .ssh folder if needed
-  ansible.builtin.file:
-    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh' }}"
-    state: directory
-    mode: '0700'
+- name: Deploy the cluster
+  hosts: localhost
+  become: false
+  gather_facts: false
+  tags: tag_deploy_cluster
+  roles:
+  - role: kubeinit.ansible.check_playbook_terminated
+  tasks:
+    - name: Deploy the cluster
+      tags: task_deploy_cluster
+      block:
+        - name: task-deploy-cluster
+          ansible.builtin.include_role:
+            name: kubeinit.kubeinit.kubeinit_prepare
+            tasks_from: deploy_cluster.yml
+            public: true

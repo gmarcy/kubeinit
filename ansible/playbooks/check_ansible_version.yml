@@ -14,8 +14,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create .ssh folder if needed
-  ansible.builtin.file:
-    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh' }}"
-    state: directory
-    mode: '0700'
+- name: Check if Ansible meets version requirements.
+  hosts: localhost
+  become: false
+  gather_subset: "!all,network"
+  gather_facts: false
+  tags: tag_gather_facts
+  roles:
+  - role: kubeinit.ansible.check_ansible_version

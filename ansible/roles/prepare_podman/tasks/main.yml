@@ -40,7 +40,7 @@
 
         - name: Set version facts
           ansible.builtin.set_fact:
-            _path_element: "{{ _param_hostvars.ansible_distribution + '_' + _version if (_stability is 'stable') else _param_hostvars.ansible_distribution + '_testing' }}"
+            _path_element: "{{ _param_hostvars.ansible_distribution + '_' + (_version if (_stability == 'stable') else (_param_hostvars.ansible_distribution + '_testing')) }}"
 
       when: _param_hostvars.ansible_distribution == 'Debian'
 
@@ -72,7 +72,7 @@
           ansible.builtin.shell: |
             set -eo pipefail
             echo "deb https://download.opensuse.org/repositories/home:/kubeinit/{{ _path_element }}/ /" > /etc/apt/sources.list.d/kubeinit.list
-            curl -L "https://download.opensuse.org/repositories/home:/kubeinit/{{ _path_element }}/Release.key" | apt-key add -
+            curl -L "https://download.opensuse.org/repositories/home:/kubeinit/{{ _path_element }}/Release.key" | tee /etc/apt/trusted.gpg.d/kubeinit.asc
             apt-get update
           args:
             executable: /bin/bash

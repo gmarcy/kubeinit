@@ -1,0 +1,19 @@
+---
+parseable: true
+enable_list:
+  - 'fqcn'
+  - 'role-name'
+skip_list:
+  - 'experimental'              # Dont add any experimental rule
+  - 'key-order'
+  - 'truthy'
+  - 'yaml[indentation]'
+  - 'line-length'               # [E204] Lines should be no longer than 120 chars
+  - 'command-instead-of-module' # [E303] sed used in place of template, replace or lineinfile module
+  - 'package-latest'            # [E403] Package installs should not use latest
+  - 'var-spacing'
+  - 'schema'
+  - 'git-latest'                # Git checkouts must contain explicit version.
+  - 'var-naming'
+  - 'run-once[task]'
+  - 'name[casing]'

@@ -14,8 +14,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- name: Create .ssh folder if needed
-  ansible.builtin.file:
-    path: "{{ hostvars['kubeinit-facts'].local_home + '/.ssh' }}"
-    state: directory
-    mode: '0700'
+- name: Cleanup any remnants of previous setup deployments
+  hosts: setup_host
+  become: false
+  gather_subset: "!all,network"
+  gather_facts: false
+  tags: tag_cleanup_deployment
+  roles:
+  - role: kubeinit.ansible.check_playbook_terminated
+  - role: kubeinit.ansible.check_stop_before
+    task_to_check: task-cleanup-deployment
+  - role: kubeinit.ansible.setup_cleanup_deployment
+  - role: kubeinit.ansible.check_stop_after
+    task_to_check: task-cleanup-deployment
