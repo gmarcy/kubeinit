@@ -1,5 +1,9 @@
 ---
 
+ansible_host: localhost
+ansible_connection: local
+ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
 #
 # Additional defaults that can be provided with environment vars
 #
@@ -31,3 +35,11 @@ dns_public: "{{ lookup('env','KUBEINIT_COMMON_DNS_PUBLIC') or '1.1.1.1' }}"
 ###
 # Default SSH key type.
 ssh_keytype: "{{ lookup('env','KUBEINIT_COMMON_SSH_KEYTYPE') or 'rsa' }}"
+
+###
+# Default registry username.
+registry_username: registryusername
+
+###
+# Default registry password
+registry_password: registrypassword

@@ -14,14 +14,15 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- import_playbook: kubeinit.kubeinit.gather_kubeinit_facts
-- import_playbook: kubeinit.kubeinit.prepare_hypervisors
-- import_playbook: kubeinit.kubeinit.prepare_environment
-- import_playbook: kubeinit.kubeinit.cleanup_hypervisors
-- import_playbook: kubeinit.kubeinit.run_validations
-- import_playbook: kubeinit.kubeinit.create_network
-- import_playbook: kubeinit.kubeinit.create_services
-- import_playbook: kubeinit.kubeinit.prepare_cluster
-- import_playbook: kubeinit.kubeinit.download_cloud_images
-- import_playbook: kubeinit.kubeinit.deploy_cluster
-- import_playbook: kubeinit.kubeinit.post_deployment
+- name: Validate that the hypervisors have resources to support the cluster
+  hosts: kubeinit-cluster
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Run validations on cluster resources
+      tags: task_run_validations
+      block:
+        - name: task-run-validations
+          ansible.builtin.include_role:
+            name: kubeinit.kubeinit.kubeinit_validations
+            public: true

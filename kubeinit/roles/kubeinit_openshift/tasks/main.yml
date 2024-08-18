@@ -19,7 +19,7 @@
     name: kubeinit.kubeinit.kubeinit_libvirt
     tasks_from: deploy_{{ hostvars[kubeinit_deployment_node_name].os }}_guest.yml
     public: yes
-  loop: "{{ groups['all_extra_nodes'] }}"
+  loop: "{{ groups['extra_nodes'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   vars:
@@ -34,7 +34,7 @@
     name: kubeinit.kubeinit.kubeinit_libvirt
     tasks_from: deploy_coreos_guest.yml
     public: yes
-  loop: "{{ groups['all_controller_nodes'] }}"
+  loop: "{{ groups['controller_nodes'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   vars:
@@ -75,8 +75,8 @@
 # This can take a lot of time until the cluster converges
 - name: Wait for bootstrap to complete
   ansible.builtin.shell: |
-    openshift-install gather --dir install_dir bootstrap --bootstrap {{ hostvars[groups['all_extra_nodes'][0]].ansible_host }} \
-        {% for node in groups['all_controller_nodes'] %}{% raw %} --master {% endraw %}{{ hostvars[node].ansible_host }}{% endfor %}
+    openshift-install gather --dir install_dir bootstrap --bootstrap {{ hostvars[groups['extra_nodes'][0]].ansible_host }} \
+        {% for node in groups['controller_nodes'] %}{% raw %} --master {% endraw %}{{ hostvars[node].ansible_host }}{% endfor %}
 
     openshift-install --dir=install_dir/ wait-for bootstrap-complete --log-level info
   args:
@@ -123,7 +123,7 @@
         path: "{{ kubeinit_libvirt_target_image_dir }}/{{ hostvars[kubeinit_deployment_node_name].guest_name }}.qcow2"
 
   vars:
-    kubeinit_deployment_node_name: "{{ groups['all_extra_nodes'][0] }}"
+    kubeinit_deployment_node_name: "{{ groups['extra_nodes'][0] }}"
   delegate_to: "{{ hostvars[kubeinit_deployment_node_name].target }}"
 
 - name: Deploy the cluster compute nodes
@@ -131,7 +131,7 @@
     name: kubeinit.kubeinit.kubeinit_libvirt
     tasks_from: deploy_coreos_guest.yml
     public: yes
-  loop: "{{ groups['all_compute_nodes'] | default([]) }}"
+  loop: "{{ groups['compute_nodes'] | default([]) }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   vars:

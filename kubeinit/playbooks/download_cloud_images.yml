@@ -14,14 +14,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-- import_playbook: kubeinit.kubeinit.gather_kubeinit_facts
-- import_playbook: kubeinit.kubeinit.prepare_hypervisors
-- import_playbook: kubeinit.kubeinit.prepare_environment
-- import_playbook: kubeinit.kubeinit.cleanup_hypervisors
-- import_playbook: kubeinit.kubeinit.run_validations
-- import_playbook: kubeinit.kubeinit.create_network
-- import_playbook: kubeinit.kubeinit.create_services
-- import_playbook: kubeinit.kubeinit.prepare_cluster
-- import_playbook: kubeinit.kubeinit.download_cloud_images
-- import_playbook: kubeinit.kubeinit.deploy_cluster
-- import_playbook: kubeinit.kubeinit.post_deployment
+- name: Download the cloud images the cluster deployment needs
+  hosts: kubeinit-cluster
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Download cloud images
+      tags: task_download_images
+      block:
+        - name: task-download-images
+          ansible.builtin.include_role:
+            name: kubeinit.kubeinit.kubeinit_libvirt
+            tasks_from: download_cloud_images.yml
+            public: true

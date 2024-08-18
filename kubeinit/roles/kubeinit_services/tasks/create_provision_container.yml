@@ -164,6 +164,7 @@
     ansible_python_interpreter: /usr/bin/python3
     ansible_podman_extra_args: --remote --connection "{{ hostvars[kubeinit_deployment_node_name].target }}"
     ansible_user: root
+    type: podman
 
 - name: Disable pipelining while using podman connector
   block:
@@ -191,7 +192,7 @@
       delay: 10
       until: _result.stdout == '200'
       changed_when: "_result.rc == 0"
-      when: "'registry' in kubeinit_cluster_hostvars.services"
+      when: "'registry' in hostvars['kubeinit-cluster'].services"
 
     - name: Install cryptography and passlib
       ansible.builtin.shell: |
@@ -328,13 +329,13 @@
       register: _result_provision_service_keypair
 
     - name: Set authorized_key hostvar for provision service
-      ansible.builtin.add_host:
-        name: "{{ kubeinit_provision_service_node }}"
+      ansible.builtin.set_fact:
         authorized_key: "{{ _result_provision_service_keypair.public_key + ' ' + _result_provision_service_keypair.comment }}"
+      delegate_to: "{{ kubeinit_provision_service_node }}"
 
     - name: Add provision service authorized key to cluster authorized_keys
       ansible.builtin.set_fact:
-        authorized_keys_with_provision: "{{ kubeinit_cluster_hostvars.authorized_keys | union([hostvars[kubeinit_provision_service_node].authorized_key]) }}"
+        authorized_keys_with_provision: "{{ hostvars['kubeinit-cluster'].authorized_keys | union([hostvars[kubeinit_provision_service_node].authorized_key]) }}"
 
     - name: Install cluster authorized keys
       ansible.posix.authorized_key:
@@ -359,20 +360,18 @@
   delegate_to: "{{ kubeinit_provision_service_name }}"
 
 - name: Update the cluster authorized_keys
-  ansible.builtin.add_host:
-    name: "{{ kubeinit_cluster_name }}"
+  ansible.builtin.set_fact:
     authorized_keys: "{{ authorized_keys_with_provision }}"
+  delegate_to: 'kubeinit-cluster'
+  delegate_facts: true
 
 - name: Add registry auth info to cluster vars
-  ansible.builtin.add_host:
-    name: "{{ kubeinit_cluster_name }}"
+  ansible.builtin.set_fact:
     domain_cert: "{{ _result_domain_cert_b64.content | string | b64decode }}"
     registry_disconnected_auth: "{{ disconnected_auth }}"
     registry_pullsecret: "{{ kubeinit_registry_pullsecret }}"
-
-- name: Update kubeinit_cluster_hostvars
-  ansible.builtin.set_fact:
-    kubeinit_cluster_hostvars: "{{ hostvars[kubeinit_cluster_name] }}"
+  delegate_to: 'kubeinit-cluster'
+  delegate_facts: true
 
 - name: Gather network facts
   ansible.builtin.gather_facts:

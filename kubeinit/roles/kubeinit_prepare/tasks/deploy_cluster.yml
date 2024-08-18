@@ -22,18 +22,13 @@
         tasks_from: prepare_services.yml
         public: true
       vars:
-        services_prepared: "{{ 'kubeinit_facts' in groups }}"
+        services_prepared: "{{ 'hypervisor_hosts' in groups }}"
       when: not services_prepared
 
-    - name: Stop the deployment if required
-      block:
-        - name: "Stop before 'task-deploy-cluster' when requested"
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_before_task is defined and kubeinit_stop_before_task == 'task-deploy-cluster'
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping before task-deploy-cluster'
+        that: (kubeinit_stop_before_task | default('')) != 'task-deploy-cluster'
   tags: omit_from_grapher
 
 - name: Delegate to the distro role to deploy the cluster
@@ -44,21 +39,13 @@
 - name: Update hosts and stop the deployment if required
   block:
     - name: Add task-deploy-cluster to tasks_completed
-      ansible.builtin.add_host:
-        name: "kubeinit-facts"
-        tasks_completed: "{{ kubeinit_facts_hostvars.tasks_completed | union(['task-deploy-cluster']) }}"
-
-    - name: Update kubeinit_facts_hostvars
       ansible.builtin.set_fact:
-        kubeinit_facts_hostvars: "{{ hostvars['kubeinit-facts'] }}"
+        tasks_completed: "{{ hostvars['kubeinit-facts'].tasks_completed | union(['task-deploy-cluster']) }}"
+      delegate_to: 'kubeinit-facts'
+      delegate_facts: true
 
-    - name: Stop the deployment if required
-      block:
-        - name: Stop after 'task-deploy-cluster' when requested
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_after_task is defined and kubeinit_stop_after_task in kubeinit_facts_hostvars.tasks_completed
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping after task-deploy-cluster'
+        that: (kubeinit_stop_after_task | default('')) not in hostvars['kubeinit-facts'].tasks_completed
   tags: omit_from_grapher

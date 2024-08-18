@@ -17,12 +17,12 @@
 - name: Set fact if kubeinit_openshift_registry_pullsecret is empty
   ansible.builtin.set_fact:
     pullsecret_empty: "{{ kubeinit_openshift_registry_pullsecret_empty|dict2items | symmetric_difference(kubeinit_openshift_registry_pullsecret|dict2items) | length == 0 }}"
-  when: not 'registry' in kubeinit_cluster_hostvars.services
+  when: not 'registry' in hostvars['kubeinit-cluster'].services
 
 - name: Override initial pullsecret with fake auth if empty
   ansible.builtin.set_fact:
     kubeinit_openshift_registry_pullsecret: "{{ '{\"auths\": {\"fakeregistry:5000\": {\"auth\": \"foo\"}}}' | from_json }}"
-  when: not 'registry' in kubeinit_cluster_hostvars.services and pullsecret_empty|bool
+  when: not 'registry' in hostvars['kubeinit-cluster'].services and pullsecret_empty|bool
 
 - name: Only use these tasks if we are deploying OCP and not OKD
   block:
@@ -213,7 +213,7 @@
         executable: /bin/bash
       register: _result
       changed_when: "_result.rc == 0"
-      when: "'registry' in kubeinit_cluster_hostvars.services"
+      when: "'registry' in hostvars['kubeinit-cluster'].services"
 
   delegate_to: "{{ kubeinit_provision_service_node }}"
 
@@ -225,7 +225,7 @@
     dest: "{{ kubeinit_libvirt_target_image_dir }}/"
     force: no
     mode: '0666'
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"
@@ -238,7 +238,7 @@
     dest: "{{ kubeinit_libvirt_target_image_dir }}/"
     force: no
     mode: '0666'
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"
@@ -259,7 +259,7 @@
     executable: /bin/bash
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"
@@ -281,7 +281,7 @@
     executable: /bin/bash
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"

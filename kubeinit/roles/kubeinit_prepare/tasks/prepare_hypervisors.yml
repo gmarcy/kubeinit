@@ -19,16 +19,11 @@
     - name: Gather kubeinit facts if needed
       ansible.builtin.include_tasks: gather_kubeinit_facts.yml
       vars:
-        facts_prepared: "{{ 'kubeinit_facts' in groups }}"
+        facts_prepared: "{{ 'hypervisor_hosts' in groups }}"
       when: not facts_prepared
 
-    - name: Stop the deployment if required
-      block:
-        - name: "Stop before 'task-prepare-hypervisors' when requested"
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_before_task is defined and kubeinit_stop_before_task == 'task-prepare-hypervisors'
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping before task-prepare-hypervisors'
+        that: (kubeinit_stop_before_task | default('')) != 'task-prepare-hypervisors'
   tags: omit_from_grapher

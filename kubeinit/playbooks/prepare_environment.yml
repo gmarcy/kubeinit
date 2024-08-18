@@ -1,0 +1,84 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Stop the deployment if requested
+  hosts: kubeinit-facts
+  become: false
+  gather_facts: false
+  tasks:
+    - name: task-prepare-environment
+      block:
+        - name: Gather hypervisor facts if needed
+          ansible.builtin.include_tasks: prepare_hypervisors.yml
+          vars:
+            hypervisors_prepared: "{{ 'hypervisor_hosts' in groups }}"
+          when: not hypervisors_prepared
+
+        - name: Stop the deployment if requested
+          ansible.builtin.assert:
+            msg: 'Stopping before task-prepare-environment'
+            that: (kubeinit_stop_before_task | default('')) != 'task-prepare-environment'
+      tags: omit_from_grapher
+
+- name: Prepare the environment on the hypervisors to deploy the cluster
+  hosts: kubeinit-cluster
+  become: false
+  gather_facts: false
+  roles:
+    - role: kubeinit.kubeinit.kubeinit_prepare
+
+- name: Add all cluster authorized keys to all hosts
+  hosts: "{{ hostvars['kubeinit-facts'].all_hosts }}"
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Add all cluster authorized keys to all hosts
+      ansible.posix.authorized_key:
+        user: root
+        key: "{{ item }}"
+        state: present
+      loop: "{{ hostvars['kubeinit-cluster'].authorized_keys }}"
+
+- name: Add ssh ProxyCommand option for all nodes
+  hosts: "{{ hostvars['kubeinit-cluster'].all_nodes }}"
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Add ssh ProxyCommand option for all nodes
+      ansible.builtin.set_fact:
+        ansible_ssh_common_args: >-
+          {{ ansible_ssh_common_args }} -i ~/.ssh/{{ cluster_name }}_id_{{ ssh_keytype }} -o ProxyCommand="ssh {{ ansible_ssh_common_args }} -i ~/.ssh/{{ cluster_name }}_id_{{ ssh_keytype }} -W %h:%p -q root@{{ ovn_central_host_address }}"
+      vars:
+        cluster_name: "{{ hostvars['kubeinit-cluster'].cluster_name }}"
+        ovn_central_host: "{{ hostvars['kubeinit-facts'].kubeinit_ovn_central_host }}"
+        ovn_central_host_address: "{{ hostvars[ovn_central_host].ssh_connection_address }}"
+        ssh_keytype: "{{ hostvars['kubeinit-facts'].ssh_keytype }}"
+
+- name: Stop the deployment if requested
+  hosts: kubeinit-facts
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Add task-prepare-environment to tasks_completed
+      ansible.builtin.set_fact:
+        tasks_completed: "{{ tasks_completed | union(['task-prepare-environment']) }}"
+      tags: omit_from_grapher
+
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping after task-prepare-environment'
+        that: (kubeinit_stop_after_task | default('')) not in tasks_completed
+      tags: omit_from_grapher

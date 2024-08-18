@@ -21,19 +21,14 @@
   tags: omit_from_grapher
 
 #
-# Gather facts needed to create the kubeinit_hypervisors group
+# Gather facts needed to create the hypervisor_hosts group
 #
 
 - name: Add playbook context facts
-  ansible.builtin.add_host:
-    name: 'kubeinit-facts'
-    groups: 'kubeinit_facts'
+  ansible.builtin.set_fact:
     container_run: "{{ kubeinit_container_run | default(false) | bool }}"
-
-- name: Load kubeinit_env group
-  ansible.builtin.add_host:
-    name: 'kubeinit-env'
-    groups: 'kubeinit_env'
+  delegate_to: 'kubeinit-facts'
+  delegate_facts: true
 
 - name: Gather kubeinit secrets
   ansible.builtin.include_role:
@@ -109,15 +104,9 @@
     kubeinit_cluster_map: "{{ kubeinit_cluster_spec | from_yaml }}"
   when: kubeinit_cluster_spec is defined
 
-- name: Assert kubeinit_cluster group and kubeinit_cluster_spec have same name when both defined
-  ansible.builtin.assert:
-    msg: "Cluster name from inventory and command-line specification must match."
-    that: kubeinit_cluster_map['cluster_name'] == groups['kubeinit_cluster'][0]
-  when: kubeinit_cluster_map['cluster_name'] | default('') | length > 0 and groups['kubeinit_cluster'][0] | default('') | length > 0
-
 - name: Define kubeinit_cluster_name
   ansible.builtin.set_fact:
-    kubeinit_cluster_name: "{{ kubeinit_cluster_map['cluster_name'] | default(groups['kubeinit_cluster'][0]) | default(kubeinit_spec_distro + 'cluster') }}"
+    kubeinit_cluster_name: "{{ kubeinit_cluster_map['cluster_name'] | default(kubeinit_spec_distro + 'cluster') }}"
 
 - name: Add kubeinit_cluster_name to kubeinit-facts
   ansible.builtin.set_fact:
@@ -125,19 +114,13 @@
   delegate_to: 'kubeinit-facts'
   delegate_facts: true
 
-- name: Create kubeinit_cluster group
-  ansible.builtin.add_host:
-    name: "{{ kubeinit_cluster_name }}"
-    group: 'kubeinit_cluster'
-  when: groups['kubeinit_cluster'] | default([]) | length == 0
-
-- name: Add kubeinit_cluster_map entries to kubeinit_cluster group
+- name: Add kubeinit_cluster_map entries to kubeinit-cluster host
   ansible.builtin.set_fact:
     cluster_domain: "{{ kubeinit_cluster_map['cluster_domain'] | default(omit) }}"
     hypervisor_name_pattern: "{{ kubeinit_cluster_map['hypervisor_name_pattern'] | default(omit) }}"
     controller_name_pattern: "{{ kubeinit_cluster_map['controller_name_pattern'] | default(omit) }}"
     compute_name_pattern: "{{ kubeinit_cluster_map['compute_name_pattern'] | default(omit) }}"
-  delegate_to: "{{ kubeinit_cluster_name }}"
+  delegate_to: 'kubeinit-cluster'
   delegate_facts: true
   when: kubeinit_cluster_map is defined
 
@@ -146,10 +129,10 @@
     post_deployment_services_list: "{{ post_deployment_services_spec | from_yaml }}"
   when: post_deployment_services_spec is defined
 
-- name: Add post_deployment_services_list to kubeinit_cluster group
+- name: Add post_deployment_services_list to kubeinit-cluster host
   ansible.builtin.set_fact:
     post_deployment_services: "{{ post_deployment_services_list }}"
-  delegate_to: "{{ kubeinit_cluster_name }}"
+  delegate_to: 'kubeinit-cluster'
   delegate_facts: true
   when: post_deployment_services_list | default([]) | length > 0
 
@@ -158,10 +141,10 @@
     extra_roles_list: "{{ extra_roles_spec | from_yaml }}"
   when: extra_roles_spec is defined
 
-- name: Add extra_roles_list to kubeinit_cluster group
+- name: Add extra_roles_list to kubeinit-cluster host
   ansible.builtin.set_fact:
     extra_roles: "{{ extra_roles_list }}"
-  delegate_to: "{{ kubeinit_cluster_name }}"
+  delegate_to: 'kubeinit-cluster'
   delegate_facts: true
   when: extra_roles_list | default([]) | length > 0
 
@@ -170,25 +153,14 @@
     hypervisor_hosts_map_list: "{{ hypervisor_hosts_spec | from_yaml }}"
   when: hypervisor_hosts_spec is defined
 
-- name: Assert hypervisor_hosts group and hypervisor_hosts_spec have same names when both defined
-  ansible.builtin.assert:
-    msg: "Hypervisor names from inventory and command-line specification must match."
-    that: hypervisor_hosts_map_list[ansible_loop.index0]['host'] == groups['hypervisor_hosts'][ansible_loop.index0]
-  loop: "{{ range(kubeinit_spec_hypervisor_count|int) | list }}"
-  loop_control:
-    extended: true
-  when: hypervisor_hosts_map_list[ansible_loop.index0]['host'] | default('') | length > 0 and groups['hypervisor_hosts'][ansible_loop.index0] | default('') | length > 0
-
 - name: Create hypervisor hosts for undefined cluster hypervisors
   ansible.builtin.add_host:
-    name: "{{ hypervisor_hosts_map_list[ansible_loop.index0]['host'] | default(hostvars[kubeinit_cluster_name].hypervisor_name_pattern | format(ansible_loop.index)) }}"
-    groups:
-      - 'hypervisor_hosts'
-      - 'kubeinit_hypervisors'
+    name: "{{ hypervisor_hosts_map_list[ansible_loop.index0]['host'] | default(hostvars['kubeinit-cluster'].hypervisor_name_pattern | format(ansible_loop.index)) }}"
+    group: ['hypervisor_hosts','all_hosts']
+    type: hypervisor
   loop: "{{ range(kubeinit_spec_hypervisor_count|int) | list }}"
   loop_control:
     extended: true
-  when: groups['hypervisor_hosts'] | default([]) | length == 0
 
 - name: Assign defaults to existing cluster hypervisors
   ansible.builtin.set_fact:
@@ -200,17 +172,89 @@
   delegate_to: "{{ groups['hypervisor_hosts'][ansible_loop.index0] }}"
   delegate_facts: true
 
-- name: Add remaining spec vars to kubeinit_hypervisors group
+- name: Add remaining spec vars to hypervisor_hosts group
   ansible.builtin.set_fact:
     ansible_host: "{{ hypervisor_hosts_map_list[ansible_loop.index0]['ansible_host'] | default(omit) }}"
     ssh_hostname: "{{ hypervisor_hosts_map_list[ansible_loop.index0]['ssh_hostname'] | default(omit) }}"
     ssh_username: "{{ hypervisor_hosts_map_list[ansible_loop.index0]['ssh_username'] | default(omit) }}"
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     extended: true
   delegate_to: "{{ item }}"
   delegate_facts: true
   when: hypervisor_hosts_map_list is defined
+
+#
+# Setup bastion host
+#
+- name: Parse bastion_host_spec into a dictionary if defined
+  ansible.builtin.set_fact:
+    bastion_host_map: "{{ bastion_host_spec | from_yaml }}"
+  when: bastion_host_spec is defined
+
+- name: Assert bastion_host_spec does not have both target and ansible_host keys
+  ansible.builtin.assert:
+    msg: "The bastion_host_spec cannot have both target and ansible_host keys."
+    that: bastion_host_map['target'] is not defined or bastion_host_map['ansible_host'] is not defined
+  when: bastion_host_map is defined
+
+- name: Define default bastion target and ansible_host from spec target
+  ansible.builtin.set_fact:
+    default_bastion_target: "{{ bastion_host_map['target'] }}"
+  when: bastion_host_map['target'] | default('') | length > 0
+
+- name: Define default bastion target and ansible_host from spec ansible_host
+  ansible.builtin.set_fact:
+    default_bastion_target: "{{ bastion_host_map['host'] | default('bastion') }}"
+  when: bastion_host_map['ansible_host'] | default('') | length > 0
+
+- name: Use the first hypervisor if neither bastion host spec or group defines a target or ansible_host
+  ansible.builtin.set_fact:
+    kubeinit_bastion_host: "{{ default_bastion_target | default(groups['hypervisor_hosts'] | first) }}"
+
+- name: Create a host entry for the bastion host when it does not have a target
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_bastion_host }}"
+    group: 'all_hosts'
+    type: bastion
+    ansible_host: "{{ bastion_host_map['ansible_host'] }}"
+  when: bastion_host_map['ansible_host'] | default('') | length > 0
+
+#
+# Setup ovn-central host
+#
+- name: Parse ovn_central_host_spec into a dictionary if defined
+  ansible.builtin.set_fact:
+    ovn_central_host_map: "{{ ovn_central_host_spec | from_yaml }}"
+  when: ovn_central_host_spec is defined
+
+- name: Assert ovn_central_host_spec does not have both target and ansible_host keys
+  ansible.builtin.assert:
+    msg: "The ovn_central_host_spec cannot have both target and ansible_host keys."
+    that: ovn_central_host_map['target'] is not defined or ovn_central_host_map['ansible_host'] is not defined
+  when: ovn_central_host_map is defined
+
+- name: Define default ovn-central target and ansible_host from spec target
+  ansible.builtin.set_fact:
+    default_ovn_central_target: "{{ ovn_central_host_map['target'] }}"
+  when: ovn_central_host_map['target'] | default('') | length > 0
+
+- name: Define default ovn-central target and ansible_host from spec ansible_host
+  ansible.builtin.set_fact:
+    default_ovn_central_target: "{{ ovn_central_host_map['host'] | default('ovn-central') }}"
+  when: ovn_central_host_map['ansible_host'] | default('') | length > 0
+
+- name: Use the first hypervisor if ovn-central host spec does now define a target
+  ansible.builtin.set_fact:
+    kubeinit_ovn_central_host: "{{ default_ovn_central_target | default(groups['hypervisor_hosts'] | first) }}"
+
+- name: Create a host entry for the ovn-central host when it does not have a target
+  ansible.builtin.add_host:
+    name: "{{ kubeinit_ovn_central_host }}"
+    group: 'all_hosts'
+    type: 'ovn-central'
+    ansible_host: "{{ ovn_central_host_map['ansible_host'] }}"
+  when: ovn_central_host_map['ansible_host'] | default('') | length > 0
 
 - name: Add kubeinit_spec facts to cluster facts
   ansible.builtin.set_fact:
@@ -218,15 +262,15 @@
     distro_role: "{{ kubeinit_distro_role }}"
     controller_count: "{{ kubeinit_spec_controller_count }}"
     compute_count: "{{ kubeinit_spec_compute_count }}"
-  delegate_to: "{{ kubeinit_cluster_name }}"
+  delegate_to: 'kubeinit-cluster'
   delegate_facts: true
 
 - name: Set more cluster facts from inventory groups and kubeinit_spec
   ansible.builtin.set_fact:
     kubeinit_cluster_distro: "{{ kubeinit_spec_distro }}"
     kubeinit_cluster_distro_role: "{{ kubeinit_distro_role }}"
-    kubeinit_cluster_domain: "{{ hostvars[kubeinit_cluster_name].cluster_domain }}"
-    kubeinit_cluster_fqdn: "{{ kubeinit_cluster_name + '.' + hostvars[kubeinit_cluster_name].cluster_domain }}"
+    kubeinit_cluster_domain: "{{ hostvars['kubeinit-cluster'].cluster_domain }}"
+    kubeinit_cluster_fqdn: "{{ kubeinit_cluster_name + '.' + hostvars['kubeinit-cluster'].cluster_domain }}"
 
 - name: Create local_ssh_dir folder if needed
   ansible.builtin.file:
@@ -257,14 +301,14 @@
   ansible.builtin.set_fact:
     authorized_key: "{{ _result_keypair.public_key + ' ' + _result_keypair.comment }}"
 
-- name: Add cluster authorized_key to root account of all hypervisors
+- name: Add cluster authorized_key to root account of all hosts
   ansible.posix.authorized_key:
     user: root
     key: "{{ authorized_key }}"
     state: present
   become: true
   become_user: root
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  loop: "{{ groups['all_hosts'] }}"
   delegate_to: "{{ item }}"
   delegate_facts: true
 
@@ -294,7 +338,7 @@
     tasks_from: create_host_ssh_config.yml
     public: true
   vars:
-    _param_hosts: "{{ groups['kubeinit_hypervisors'] }}"
+    _param_hosts: "{{ groups['all_hosts'] }}"
     _param_ssh_keytype: "{{ hostvars['kubeinit-facts'].ssh_keytype }}"
     _param_keypair_path: "{{ kubeinit_cluster_keypair_path }}"
     _param_dest_path: "{{ kubeinit_cluster_ssh_config }}"
@@ -306,16 +350,16 @@
   delegate_to: 'kubeinit-facts'
   delegate_facts: true
 
-- name: Add ansible_ssh_extra_args to hypervisors
+- name: Add ansible_ssh_extra_args to all hosts
   ansible.builtin.set_fact:
     ansible_ssh_extra_args: "{{ '-i ' + kubeinit_cluster_keypair_path + ' -F ' + kubeinit_cluster_ssh_config }}"
     ansible_user: "{{ hostvars['kubeinit-facts'].remote_user }}"
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  loop: "{{ groups['all_hosts'] }}"
   delegate_to: "{{ item }}"
   delegate_facts: true
 
 - name: Confirm that we have ansible host connectivity
   ansible.builtin.ping:
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
+  loop: "{{ groups['all_hosts'] }}"
   delegate_to: "{{ item }}"
   delegate_facts: true

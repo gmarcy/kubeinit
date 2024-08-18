@@ -29,7 +29,7 @@ view "internal" {
         file "/etc/bind/kubeinit/zones/internals/db.{{ kubeinit_bind_service_address | ipsubnet(24) | ipaddr('network') }}";  # 192.168.1.0/24 subnet
     };
 
-{% for cluster in groups['kubeinit_clusters'] | default([]) %}
+{% for cluster in hostvars['kubeinit-facts']['kubeinit_clusters'] | default([]) %}
     {% if not cluster == kubeinit_cluster_name %}
         {% set cluster_net_name = hostvars[cluster].network_name %}
         {% set cluster_nameserver_net = hostvars[cluster_net_name].network %}

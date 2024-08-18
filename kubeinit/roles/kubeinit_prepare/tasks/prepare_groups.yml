@@ -18,79 +18,11 @@
 #
 # Define additional groups we will use
 #
-- name: Add all controller nodes to the all_controller_nodes group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    guest_name: "{{ kubeinit_cluster_name }}-{{ item }}"
-    group: all_controller_nodes
-    fqdn: "{{ item }}.{{ kubeinit_cluster_fqdn }}"
-    target: "{{ hostvars[item].target }}"
-    os: "{{ hostvars[item].os }}"
-  loop: "{{ groups['controller_nodes'][0:hostvars[kubeinit_cluster_name].controller_count|int] | default([]) | list }}"
-
-- name: Add all compute nodes to the all_compute_nodes group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    guest_name: "{{ kubeinit_cluster_name }}-{{ item }}"
-    group: all_compute_nodes
-    fqdn: "{{ item }}.{{ kubeinit_cluster_fqdn }}"
-    target: "{{ hostvars[item].target }}"
-    os: "{{ hostvars[item].os }}"
-  loop: "{{ groups['compute_nodes'][0:hostvars[kubeinit_cluster_name].compute_count|int] | default([]) | list }}"
-
-- name: Add all controller and compute nodes to the all_cluster_nodes group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    group: all_cluster_nodes
-    fqdn: "{{ hostvars[item].fqdn }}"
-    target: "{{ hostvars[item].target }}"
-    os: "{{ hostvars[item].os }}"
-  loop: "{{ groups['all_controller_nodes'] + groups['all_compute_nodes'] | default([]) }}"
-
-- name: Add any extra cluster vm guest nodes to the all_extra_nodes group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    guest_name: "{{ kubeinit_cluster_name }}-{{ item }}"
-    group: all_extra_nodes
-    fqdn: "{{ item }}.{{ kubeinit_cluster_fqdn }}"
-    target: "{{ hostvars[item].target }}"
-    os: "{{ hostvars[item].os }}"
-    ram: "{{ hostvars[item].ram }}"
-  loop: "{{ groups['extra_nodes'] | default([]) | list }}"
-  when: kubeinit_cluster_distro in hostvars[item].when_distro
-
-- name: Collect all cluster node hypervisors
-  ansible.builtin.set_fact:
-    all_cluster_hypervisors: "{{ all_cluster_hypervisors | default([]) | union([hostvars[item].target]) }}"
-  loop: "{{ groups['all_cluster_nodes'] + (groups['all_extra_nodes'] | default([])) }}"
-
-- name: Show the before and after values of the hypervisors fact
-  ansible.builtin.debug:
-    msg: "{{ groups['kubeinit_hypervisors'] }} ==> {{ all_cluster_hypervisors }}"
-
-# TODO: check later to see if this would be a useful optimization
-# - name: Set all cluster hypervisors fact
-#   ansible.builtin.add_host:
-#     name: "{{ kubeinit_cluster_name }}"
-#     hypervisors: "{{ all_cluster_hypervisors }}"
-
-- name: Add all service nodes to the all_service_nodes group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    guest_name: "{{ kubeinit_cluster_name }}-{{ item }}"
-    group: all_service_nodes
-    fqdn: "{{ item }}.{{ kubeinit_cluster_fqdn }}"
-    services: "{{ hostvars[item].services }}"
-    target: "{{ hostvars[item].target }}"
-    os: "{{ hostvars[item].os }}"
-    type: container
-    container_host: "{{ hostvars[item].target }}"
-  loop: "{{ groups['service_nodes'] | default([]) | list }}"
 
 - name: Create tuples for each service and each service node providing that service
   ansible.builtin.set_fact:
     cluster_services: "{{ (cluster_services | default([])) + (item[0] | product([item[1]])) }}"
-  loop: "{{ groups['all_service_nodes'] | map('extract', hostvars, 'services') | zip(groups['all_service_nodes']) }}"
+  loop: "{{ groups['service_nodes'] | map('extract', hostvars, 'services') | zip(groups['service_nodes']) }}"
 
 - name: Combine those tuples into dict of services and nodes providing that service
   ansible.builtin.set_fact:
@@ -98,21 +30,20 @@
   loop: "{{ cluster_services }}"
 
 - name: Check for any services being provided on more than one service node
-  ansible.builtin.fail:
-    msg:
-      "You are not currently permitted to run the same service on more than one service node."
+  ansible.builtin.assert:
+    msg: "You are not currently permitted to run the same service on more than one service node."
+    that: item.value | length == 1
   loop: "{{ cluster_services_dict | dict2items }}"
-  when: item.value | length > 1
 
 - name: Use first service node if there is no assigned provision service node
   ansible.builtin.set_fact:
-    cluster_services_dict: "{{ cluster_services_dict | combine({'provision': [groups['all_service_nodes'][0]]}) }}"
+    cluster_services_dict: "{{ cluster_services_dict | combine({'provision': [groups['service_nodes'][0]]}) }}"
   when: "'provision' not in cluster_services_dict"
 
 - name: Flatten dictionary values into final form
   ansible.builtin.set_fact:
     all_cluster_services: "{{ (all_cluster_services | default({})) | combine({item.key: item.value[0]}) }}"
-  loop: "{{ cluster_services_dict | dict2items | flatten }}"
+  loop: "{{ cluster_services_dict | dict2items }}"
 
 - name: Set fact for cluster nameserver
   ansible.builtin.set_fact:
@@ -120,57 +51,23 @@
   when: "'bind' in all_cluster_services"
 
 - name: Set all services cluster fact
-  ansible.builtin.add_host:
-    name: "{{ kubeinit_cluster_name }}"
-    nameserver: "{{ kubeinit_cluster_nameserver | default(omit) }}"
+  ansible.builtin.set_fact:
     services: "{{ all_cluster_services }}"
 
-- name: Add all service and cluster nodes to the all_nodes group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    group: all_nodes
-    fqdn: "{{ hostvars[item].fqdn }}"
-    os: "{{ hostvars[item].os }}"
-  loop: "{{ groups['all_service_nodes'] + groups['all_cluster_nodes'] + (groups['all_extra_nodes'] | default([])) }}"
-
-- name: Add all cluster hypervisors to the all_hosts group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    group: all_hosts
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
-  when: >
-    item in hostvars[kubeinit_ovn_central_host_name].target or
-    item in groups['kubeinit_hypervisors']
-
-- name: Add all hosts to the all_ovn_hosts group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    group: all_ovn_hosts
-  loop: "{{ groups['all_hosts'] }}"
-
-- name: Collect all of the localhost and hypervisor authorized keys into authorized_keys list
+- name: Set all_nodes fact
   ansible.builtin.set_fact:
-    all_authorized_keys: "{{ (all_authorized_keys | default([])) | union([hostvars[item].authorized_key]) }}"
-  loop: "{{ ['localhost'] | union(groups['all_hosts']) }}"
+    all_nodes: "{{ _hostvars | map(attribute='inventory_hostname') }}"
+  vars:
+    _hostvars: "{{ (groups['service_nodes'] + groups['cluster_nodes'] + (groups['extra_nodes'] | default([]))) | map('extract', hostvars) }}"
 
 - name: Set all hypervisor authorized keys cluster fact
-  ansible.builtin.add_host:
-    name: "{{ kubeinit_cluster_name }}"
-    authorized_keys: "{{ all_authorized_keys }}"
-
-- name: Add services guest and cluster nodes to the all_guest_vms group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    group: all_guest_vms
-  loop: "{{ groups['all_cluster_nodes'] + (groups['all_extra_nodes'] | default([])) }}"
-  when: hostvars[item].type == 'virtual'
-
-- name: Collect all of the node aliases
   ansible.builtin.set_fact:
-    all_node_aliases: "{{ (all_node_aliases | default([])) + ([item[0]] | product(item) | list) }}"
-  loop: "{{ groups['all_nodes'] | zip(groups['all_nodes'] | map('extract', hostvars, 'fqdn'), groups['all_nodes'] | map('extract', hostvars, 'ansible_host')) }}"
+    authorized_keys: "{{ _hostvars | map(attribute='authorized_key') }}"
+  vars:
+    _hostvars: "{{ ['localhost-facts'] + groups['all_hosts'] | map('extract', hostvars) }}"
 
-- name: Set all node aliases cluster fact
-  ansible.builtin.add_host:
-    name: "{{ kubeinit_cluster_name }}"
-    node_aliases: "{{ all_node_aliases }}"
+- name: Set all_guest_vms fact
+  ansible.builtin.set_fact:
+    all_guest_vms: "{{ _hostvars | selectattr('type', '==', 'virtual') | map(attribute='inventory_hostname') }}"
+  vars:
+    _hostvars: "{{ all_nodes | map('extract', hostvars) }}"

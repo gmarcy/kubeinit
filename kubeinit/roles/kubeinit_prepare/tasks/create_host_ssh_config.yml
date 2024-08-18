@@ -47,7 +47,7 @@
 #       name: kubeinit.kubeinit.kubeinit_prepare
 #       tasks_from: create_host_ssh_config
 #     vars:
-#       ssh_hosts: "{{ groups['kubeinit_hypervisors'] }}"
+#       ssh_hosts: "{{ groups['hypervisor_hosts'] }}"
 #       keypair_path: "{{ kubeinit_cluster_keypair_path }}"
 #       config_path: "{{ kubeinit_cluster_ssh_config }}"
 #       file_mode: '0644'
@@ -62,3 +62,7 @@
   ansible.builtin.command: cat {{ _param_dest_path | default('~/.ssh/config') }}
   register: _result
   changed_when: "_result.rc == 0"
+
+- name: Clear temp results
+  ansible.builtin.set_fact:
+    _result: null

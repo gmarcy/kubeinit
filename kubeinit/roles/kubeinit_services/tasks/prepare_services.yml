@@ -27,33 +27,30 @@
     src: ~/domain.crt
   register: _result_domain_cert_b64
   delegate_to: "{{ kubeinit_provision_service_node }}"
-  when: kubeinit_cluster_hostvars.domain_cert is not defined
+  delegate_facts: true
+  when: hostvars['kubeinit-cluster'].domain_cert is not defined
 
 - name: Add contents of domain.crt cluster vars
-  ansible.builtin.add_host:
-    name: "{{ kubeinit_cluster_name }}"
+  ansible.builtin.set_fact:
     domain_cert: "{{ _result_domain_cert_b64.content | string | b64decode }}"
-  when: kubeinit_cluster_hostvars.domain_cert is not defined
+  delegate_to: 'kubeinit-cluster'
+  delegate_facts: true
+  when: hostvars['kubeinit-cluster'].domain_cert is not defined
 
 - name: Read in the contents of registry-auths.json
   ansible.builtin.slurp:
     src: ~/registry-auths.json
   register: _result_registry_auths_b64
   delegate_to: "{{ kubeinit_provision_service_node }}"
-  when: kubeinit_cluster_hostvars.registry_disconnected_auth is not defined
+  delegate_facts: true
+  when: hostvars['kubeinit-cluster'].registry_disconnected_auth is not defined
 
 - name: Add contents of regustry-auths.json to cluster vars
-  ansible.builtin.add_host:
-    name: "{{ kubeinit_cluster_name }}"
-    registry_disconnected_auth: "{{ _result_registry_auths_b64.content | string | b64decode }}"
-  when: kubeinit_cluster_hostvars.registry_disconnected_auth is not defined
-
-- name: Update kubeinit_cluster_hostvars
   ansible.builtin.set_fact:
-    kubeinit_cluster_hostvars: "{{ hostvars[kubeinit_cluster_name] }}"
-  when: >
-    kubeinit_cluster_hostvars.domain_cert is not defined or
-    kubeinit_cluster_hostvars.registry_disconnected_auth is not defined
+    registry_disconnected_auth: "{{ _result_registry_auths_b64.content | string | b64decode }}"
+  delegate_to: 'kubeinit-cluster'
+  delegate_facts: true
+  when: hostvars['kubeinit-cluster'].registry_disconnected_auth is not defined
 
 - name: Gather network and host facts for guest
   ansible.builtin.include_role:

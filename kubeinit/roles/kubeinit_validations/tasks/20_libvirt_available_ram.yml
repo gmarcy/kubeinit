@@ -24,7 +24,7 @@
   args:
     executable: /bin/bash
   register: _result_total_ram
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   delegate_to: "{{ item }}"
   changed_when: "_result_total_ram.rc == 0"
 
@@ -44,7 +44,7 @@
 - name: Get the total inventory ram usage
   ansible.builtin.set_fact:
     kubeinit_validations_libvirt_ram_usage: "{{ kubeinit_validations_libvirt_ram_usage|default({})| combine( {item: {'id': item, 'ram': hostvars[item].ram|int, 'target': hostvars[item].target} } ) }}"
-  loop: "{{ groups['all_guest_vms'] }}"
+  loop: "{{ all_guest_vms }}"
 
 - name: Debug
   ansible.builtin.debug:

@@ -19,7 +19,7 @@
     name: kubeinit.kubeinit.kubeinit_libvirt
     tasks_from: "deploy_{{ hostvars[kubeinit_deployment_node_name].os }}_guest.yml"
     public: yes
-  loop: "{{ groups['all_cluster_nodes'] }}"
+  loop: "{{ hostvars['kubeinit-cluster'].cluster_nodes }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   vars:
@@ -120,7 +120,7 @@
     executable: /bin/bash
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_controller_nodes'] }}"
+  loop: "{{ groups['controller_nodes'] }}"
   loop_control:
     loop_var: controller_node
   delegate_to: "{{ controller_node }}"
@@ -131,7 +131,7 @@
     path: ~/.kube
     state: directory
     mode: '0777'
-  loop: "{{ groups['all_controller_nodes'] }}"
+  loop: "{{ groups['controller_nodes'] }}"
   loop_control:
     loop_var: controller_node
   delegate_to: "{{ controller_node }}"
@@ -145,7 +145,7 @@
     executable: /bin/bash
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_controller_nodes'] }}"
+  loop: "{{ groups['controller_nodes'] }}"
   loop_control:
     loop_var: controller_node
   delegate_to: "{{ controller_node }}"
@@ -160,7 +160,7 @@
     executable: /bin/bash
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_compute_nodes'] | default([]) }}"
+  loop: "{{ groups['compute_nodes'] | default([]) }}"
   loop_control:
     loop_var: compute_node
   delegate_to: "{{ compute_node }}"
@@ -190,7 +190,7 @@
     kubectl label node {{ compute_node }} node-role.kubernetes.io/worker=
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_compute_nodes'] | default([]) }}"
+  loop: "{{ groups['compute_nodes'] | default([]) }}"
   loop_control:
     loop_var: compute_node
   delegate_to: "{{ kubeinit_provision_service_node }}"

@@ -22,7 +22,7 @@
   community.libvirt.virt:
     command: list_vms
   register: _result_vms
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: host
   delegate_to: "{{ host }}"
@@ -35,7 +35,7 @@
 - name: Generate a list of vm guest names to match
   ansible.builtin.set_fact:
     matching_vm_guest_names: "{{ (matching_vm_guest_names | default([])) | union([hostvars[item].guest_name]) }}"
-  loop: "{{ groups['all_guest_vms'] }}"
+  loop: "{{ all_guest_vms }}"
 
 - name: Destroy vms
   community.libvirt.virt:
@@ -77,7 +77,7 @@
   ansible.builtin.file:
     state: absent
     path: "{{ kubeinit_libvirt_hypervisor_tmp_dir }}/{{ guest_vm }}/"
-  loop: "{{ groups['all_hosts'] | product(groups['all_guest_vms']) }}"
+  loop: "{{ groups['hypervisor_hosts'] | product(all_guest_vms) }}"
   vars:
     kubeinit_deployment_node_name: "{{ item[0] }}"
     guest_vm: "{{ hostvars[item[1]].guest_name }}"
@@ -90,7 +90,7 @@
   community.libvirt.virt_net:
     command: list_nets
   register: _result_nets
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: host
   delegate_to: "{{ host }}"
@@ -208,7 +208,7 @@
   openvswitch.openvswitch.openvswitch_bridge:
     bridge: br-int
     state: absent
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"
@@ -218,7 +218,7 @@
   openvswitch.openvswitch.openvswitch_bridge:
     bridge: br-ex
     state: absent
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"
@@ -229,7 +229,7 @@
   register: _result
   changed_when: "_result.rc == 0"
   failed_when: _result is not defined
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"
@@ -239,7 +239,7 @@
   ansible.builtin.command: ovs-dpctl del-dp ovs-system
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"
@@ -252,7 +252,7 @@
     enabled: false
   register: _result_stop_service
   failed_when: _result_stop_service is not defined
-  loop: "{{ groups['all_hosts'] | product(['openvswitch', 'ovn-northd', 'ovn-controller']) }}"
+  loop: "{{ groups['hypervisor_hosts'] | product(['openvswitch', 'ovn-northd', 'ovn-controller']) }}"
   vars:
     kubeinit_deployment_node_name: "{{ item[0] }}"
     service_name: "{{ item[1] }}"
@@ -269,7 +269,7 @@
     enabled: false
   register: _result_stop_service
   failed_when: _result_stop_service is not defined
-  loop: "{{ groups['all_hosts'] | product(['openvswitch', 'ovn-controller']) }}"
+  loop: "{{ groups['hypervisor_hosts'] | product(['openvswitch', 'ovn-controller']) }}"
   vars:
     kubeinit_deployment_node_name: "{{ item[0] }}"
     service_name: "{{ item[1] }}"
@@ -286,7 +286,7 @@
     enabled: false
   register: _result_stop_service
   failed_when: _result_stop_service is not defined
-  loop: "{{ groups['all_hosts'] | product(['openvswitch-switch', 'ovn-host', 'ovn-central']) }}"
+  loop: "{{ groups['hypervisor_hosts'] | product(['openvswitch-switch', 'ovn-host', 'ovn-central']) }}"
   vars:
     kubeinit_deployment_node_name: "{{ item[0] }}"
     service_name: "{{ item[1] }}"
@@ -303,7 +303,7 @@
     enabled: false
   register: _result_stop_service
   failed_when: _result_stop_service is not defined
-  loop: "{{ groups['all_hosts'] | product(['openswitch-switch', 'ovn-host']) }}"
+  loop: "{{ groups['hypervisor_hosts'] | product(['openswitch-switch', 'ovn-host']) }}"
   vars:
     kubeinit_deployment_node_name: "{{ item[0] }}"
     service_name: "{{ item[1] }}"
@@ -317,7 +317,7 @@
   ansible.builtin.file:
     path: "{{ dir_name }}"
     state: absent
-  loop: "{{ groups['all_hosts'] | product(['/etc/openvswitch/conf.db', '/etc/openvswitch/system-id.conf', '/var/lib/ovn/']) }}"
+  loop: "{{ groups['hypervisor_hosts'] | product(['/etc/openvswitch/conf.db', '/etc/openvswitch/system-id.conf', '/var/lib/ovn/']) }}"
   vars:
     kubeinit_deployment_node_name: "{{ item[0] }}"
     dir_name: "{{ item[1] }}"

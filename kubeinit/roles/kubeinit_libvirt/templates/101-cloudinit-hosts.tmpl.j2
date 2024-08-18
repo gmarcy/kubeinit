@@ -26,6 +26,6 @@ you need to add the following to config:
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 
-{% for node in groups['all_nodes'] %}
+{% for node in hostvars['kubeinit-cluster'].all_nodes %}
 {{ hostvars[node].ansible_host }} {{ node }}.{{ kubeinit_cluster_fqdn }} {{ node }}
 {% endfor %}

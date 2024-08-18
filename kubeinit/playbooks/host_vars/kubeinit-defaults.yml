@@ -1,5 +1,9 @@
 ---
 
+ansible_host: localhost
+ansible_connection: local
+ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
 ###
 #
 # The default name we will use for the network
@@ -46,7 +50,7 @@ compute_node_target_order:
 #   -e cluster_nodes_spec='[{"when_group":"controller_nodes","disk"="35G"}]'
 #
 default_cluster_nodes_map_list:
-- os: "{{ hostvars['kubeinit-defaults'].cluster_node_default_distro[kubeinit_cluster_distro].os }}"
+- os: "{{ hostvars['kubeinit-defaults'].cluster_node_default_distro[hostvars['kubeinit-cluster'].distro].os }}"
 - when_type: virtual
   vcpus: "{{ cluster_node_vcpus }}"
   maxvcpus: "{{ cluster_node_maxvcpus }}"
@@ -80,7 +84,7 @@ extra_node_target_order:
 #   -e extra_nodes_spec='[{"name":"nova-compute","when_distro":["okd"],"os":"centos"}]'
 #
 default_extra_nodes_map_list:
-- os: "{{ hostvars['kubeinit-defaults'].cluster_node_default_distro[kubeinit_cluster_distro].os }}"
+- os: "{{ hostvars['kubeinit-defaults'].cluster_node_default_distro[hostvars['kubeinit-cluster'].distro].os }}"
 - when_type: virtual
   vcpus: "{{ cluster_node_vcpus }}"
   maxvcpus: "{{ cluster_node_maxvcpus }}"
@@ -110,7 +114,7 @@ service_node_target_order:
 #   -e service_nodes_spec='[{"services":["apache","bind","dnsmasq"]}]'
 #
 default_service_nodes_map_list:
-- os: "{{ hostvars['kubeinit-defaults'].cluster_node_default_distro[kubeinit_cluster_distro].os }}"
+- os: "{{ hostvars['kubeinit-defaults'].cluster_node_default_distro[hostvars['kubeinit-cluster'].distro].os }}"
   services:
   - bind
   - dnsmasq
@@ -122,4 +126,3 @@ default_service_nodes_map_list:
   - ocp
   - okd
   os: "{{ openshift_service_node_os }}"
-- name: service

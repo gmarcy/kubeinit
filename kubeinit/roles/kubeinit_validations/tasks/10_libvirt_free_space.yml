@@ -39,7 +39,7 @@
   args:
     executable: /bin/bash
   register: _result_free_storage
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   delegate_to: "{{ item }}"
   changed_when: "_result_free_storage.rc == 0"
 
@@ -59,7 +59,7 @@
 - name: Get the total inventory disk usage
   ansible.builtin.set_fact:
     kubeinit_validations_libvirt_disk_usage: "{{ kubeinit_validations_libvirt_disk_usage|default({})| combine( {item: {'id': item, 'disk': hostvars[item].disk[:-1]|int, 'target': hostvars[item].target} } ) }}"
-  loop: "{{ groups['all_guest_vms'] }}"
+  loop: "{{ all_guest_vms }}"
 
 - name: Debug
   ansible.builtin.debug:

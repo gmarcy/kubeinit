@@ -56,7 +56,7 @@
           --run-command "sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config" \
           --run-command "ssh-keygen -A" \
           --run-command "sed -i s/^SELINUX=.*$/SELINUX=permissive/g /etc/selinux/config" \
-          {% for authorized_key in kubeinit_cluster_hostvars.authorized_keys %}
+          {% for authorized_key in hostvars['kubeinit-cluster'].authorized_keys %}
             --ssh-inject root:string:"{{ authorized_key }}" \
           {% endfor %}
           --hostname {{ kubeinit_deployment_node_name }}.{{ kubeinit_cluster_fqdn }} \
@@ -83,7 +83,7 @@
             --vcpus {{ hostvars[kubeinit_deployment_node_name].vcpus }},maxvcpus={{ hostvars[kubeinit_deployment_node_name].maxvcpus }} \
             --os-variant rhel8.0 \
             --autostart \
-            --network network={{ kubeinit_cluster_hostvars.network_name }},mac={{ hostvars[kubeinit_deployment_node_name].mac }},virtualport.parameters.interfaceid={{ hostvars[kubeinit_deployment_node_name].interfaceid }},target.dev=veth0-{{ hostvars[kubeinit_deployment_node_name].ansible_host | ansible.utils.ip4_hex }},model=virtio \
+            --network network={{ hostvars['kubeinit-cluster'].network_name }},mac={{ hostvars[kubeinit_deployment_node_name].mac }},virtualport.parameters.interfaceid={{ hostvars[kubeinit_deployment_node_name].interfaceid }},target.dev=veth0-{{ hostvars[kubeinit_deployment_node_name].ansible_host | ansible.utils.ip4_hex }},model=virtio \
             --graphics none \
             --noautoconsole \
             --import \

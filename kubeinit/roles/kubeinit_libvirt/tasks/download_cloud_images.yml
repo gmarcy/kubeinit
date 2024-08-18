@@ -21,18 +21,13 @@
         name: kubeinit.kubeinit.kubeinit_prepare
         public: true
       vars:
-        environment_prepared: "{{ 'kubeinit_facts' in groups }}"
+        environment_prepared: "{{ 'hypervisor_hosts' in groups }}"
       when: not environment_prepared
 
-    - name: Stop the deployment if required
-      block:
-        - name: "Stop before 'task-download-images' when requested"
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_before_task is defined and kubeinit_stop_before_task == 'task-download-images'
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping before task-download-images'
+        that: (kubeinit_stop_before_task | default('')) != 'task-download-images'
   tags: omit_from_grapher
 
 #
@@ -41,7 +36,7 @@
 - name: Create tuples for hosts and guest vms
   ansible.builtin.set_fact:
     all_hosts_guest_vms: "{{ (all_hosts_guest_vms | default([])) + ([hypervisor] | product([guest_vm])) }}"
-  loop: "{{ groups['all_hosts'] | product(groups['all_guest_vms']) }}"
+  loop: "{{ groups['hypervisor_hosts'] | product(all_guest_vms) }}"
   vars:
     hypervisor: "{{ item[0] }}"
     guest_vm: "{{ item[1] }}"
@@ -90,21 +85,13 @@
 - name: Add hosts and stop if required
   block:
     - name: Add task-download-images to tasks_completed
-      ansible.builtin.add_host:
-        name: "kubeinit-facts"
-        tasks_completed: "{{ kubeinit_facts_hostvars.tasks_completed | union(['task-download-images']) }}"
-
-    - name: Update kubeinit_facts_hostvars
       ansible.builtin.set_fact:
-        kubeinit_facts_hostvars: "{{ hostvars['kubeinit-facts'] }}"
+        tasks_completed: "{{ hostvars['kubeinit-facts'].tasks_completed | union(['task-download-images']) }}"
+      delegate_to: 'kubeinit-facts'
+      delegate_facts: true
 
-    - name: Stop the deployment if required
-      block:
-        - name: Stop after 'task-download-images' when requested
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_after_task is defined and kubeinit_stop_after_task in kubeinit_facts_hostvars.tasks_completed
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping after task-download-images'
+        that: (kubeinit_stop_after_task | default('')) not in hostvars['kubeinit-facts'].tasks_completed
   tags: omit_from_grapher

@@ -5,7 +5,7 @@ $TTL    604800
 ; No not edit directly
 ; More information at: https://github.com/kubeinit/kubeinit
 
-{% for host in groups['all_service_nodes'] | list %}
+{% for host in groups['service_nodes'] | list %}
 @       IN      SOA     {{ host }}.{{ kubeinit_cluster_fqdn }}. admin.{{ kubeinit_cluster_fqdn }}.(
 {% endfor %}
                   1     ; Serial
@@ -16,33 +16,33 @@ $TTL    604800
 )
 
 ; name servers - NS records
-{% for host in groups['all_service_nodes'] | list %}
+{% for host in groups['service_nodes'] | list %}
     IN      NS      {{ host }}.{{ kubeinit_cluster_fqdn }}.
 {% endfor %}
 
 ; name servers - A records
-{% for host in groups['all_service_nodes'] | list %}
+{% for host in groups['service_nodes'] | list %}
 {{ host }}.{{ kubeinit_cluster_fqdn }}.                       IN      A       {{ hostvars[host].ansible_host }}
 {% endfor %}
 
 ; KubeInit cluster Cluster - A records
-{% for host in groups['all_controller_nodes'] | list %}
+{% for host in groups['controller_nodes'] | list %}
 {{ host }}.{{ kubeinit_cluster_fqdn }}.                       IN      A       {{ hostvars[host].ansible_host }}
 master{{ loop.index - 1 }}.{{ kubeinit_cluster_fqdn }}.       IN      A       {{ hostvars[host].ansible_host }}
 {% endfor %}
 
-{% for host in groups['all_compute_nodes'] | default([]) | list %}
+{% for host in groups['compute_nodes'] | default([]) | list %}
 {{ host }}.{{ kubeinit_cluster_fqdn }}.                       IN      A       {{ hostvars[host].ansible_host }}
 worker{{ loop.index - 1 }}.{{ kubeinit_cluster_fqdn }}.       IN      A       {{ hostvars[host].ansible_host }}
 
 {% endfor %}
 
-{% for host in groups['all_extra_nodes'] | default([]) | list %}
+{% for host in groups['extra_nodes'] | default([]) | list %}
 {{ host }}.{{ kubeinit_cluster_fqdn }}.                       IN      A       {{ hostvars[host].ansible_host }}
 {% endfor %}
 
 ; OpenShift internal cluster IPs - A records
-{% for host in groups['all_service_nodes'] | list %}
+{% for host in groups['service_nodes'] | list %}
 registry.{{ kubeinit_cluster_fqdn }}.                         IN      A       {{ hostvars[host].ansible_host }}
 api.{{ kubeinit_cluster_fqdn }}.                              IN      A       {{ hostvars[host].ansible_host }}
 api-int.{{ kubeinit_cluster_fqdn }}.                          IN      A       {{ hostvars[host].ansible_host }}
@@ -51,11 +51,11 @@ console-openshift-console.apps.{{ kubeinit_cluster_fqdn }}.   IN      A       {{
 oauth-openshift.apps.{{ kubeinit_cluster_fqdn }}.             IN      A       {{ hostvars[host].ansible_host }}
 {% endfor %}
 
-{% for host in groups['all_controller_nodes'] | list %}
+{% for host in groups['controller_nodes'] | list %}
 etcd-{{ loop.index - 1 }}.{{ kubeinit_cluster_fqdn }}.        IN      A       {{ hostvars[host].ansible_host }}
 {% endfor %}
 
 ; OpenShift internal cluster IPs - SRV records
-{% for host in groups['all_controller_nodes'] | list %}
+{% for host in groups['controller_nodes'] | list %}
 _etcd-server-ssl._tcp.{{ kubeinit_cluster_fqdn }}.    86400   IN    SRV     0    10    2380    etcd-{{ loop.index - 1 }}
 {% endfor %}

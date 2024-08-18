@@ -1,0 +1,370 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Stop the deployment if requested
+  hosts: kubeinit-facts
+  become: false
+  gather_facts: false
+  tasks:
+    - name: task-cleanup-hypervisors
+      block:
+        - name: Prepare environment if not prepared
+          ansible.builtin.include_role:
+            name: kubeinit.kubeinit.kubeinit_prepare
+            public: true
+          vars:
+            environment_prepared: "{{ 'hypervisor_hosts' in groups }}"
+          when: not environment_prepared
+
+        - name: Stop the deployment if requested
+          ansible.builtin.assert:
+            msg: 'Stopping before task-cleanup-hypervisors'
+            that: (kubeinit_stop_before_task | default('')) != 'task-cleanup-hypervisors'
+      tags: omit_from_grapher
+
+- name: Cleanup all resources left over from previous cluster deployment
+  hosts: kubeinit-cluster
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Find any service pods from previous deployments
+      containers.podman.podman_pod_info:
+      loop: "{{ groups['service_nodes'] }}"
+      loop_control:
+        loop_var: service_node
+      vars:
+        _container_host: "{{ hostvars[service_node].container_host }}"
+      register: _result_podinfo
+      delegate_to: "{{ _container_host }}"
+      when: hostvars[_container_host].podman_is_installed | default(false)
+
+    - name: Set facts about those pods
+      ansible.builtin.set_fact:
+        orphaned_pods: "{{ _result_podinfo.results | map(attribute='service_node', default=[]) | product(_result_podinfo.results | map(attribute='pods', default=[]) | flatten) }}"
+
+    - name: Set facts about pods for this cluster
+      ansible.builtin.set_fact:
+        orphaned_cluster_pods: "{{ (orphaned_cluster_pods | default([])) + ([service_node] | product([pod])) }}"
+      loop: "{{ orphaned_pods | default([]) | list }}"
+      loop_control:
+        loop_var: orphaned_pod
+      vars:
+        service_node: "{{ orphaned_pod[0] }}"
+        pod_name: "{{ hostvars[orphaned_pod[0]].guest_name }}-pod"
+        pod: "{{ orphaned_pod[1] }}"
+      when: pod_name == pod.Name
+
+    - fail: msg=stopping
+
+    - name: Get info from orphaned cluster pod infra containers
+      containers.podman.podman_container_info:
+        name: "{{ pod.InfraContainerID }}"
+      loop: "{{ orphaned_cluster_pods }}"
+      loop_control:
+        loop_var: orphaned_cluster_pod
+      vars:
+        service_node: "{{ orphaned_cluster_pod[0] }}"
+        pod: "{{ orphaned_cluster_pod[1] }}"
+      register: _result_containerinfo
+      delegate_to: "{{ hostvars[service_node].target }}"
+      when: orphaned_cluster_pods is defined
+
+    - name: Set facts about container netns
+      ansible.builtin.set_fact:
+        infra_container_sandbox_keys: "{{ (infra_container_sandbox_keys | default([])) + ([service_node] | product([sandbox_key])) }}"
+      loop: "{{ _result_containerinfo.results }}"
+      loop_control:
+        loop_var: infra_container_info
+      vars:
+        service_node: "{{ infra_container_info.orphaned_cluster_pod[0] }}"
+        sandbox_key: "{{ infra_container_info.containers[0].NetworkSettings.SandboxKey | basename }}"
+      when: orphaned_cluster_pods is defined
+
+    - name: Find any pod networks from previous deployments
+      containers.podman.podman_network_info:
+      loop: "{{ groups['service_nodes'] }}"
+      loop_control:
+        loop_var: service_node
+      vars:
+        kubeinit_deployment_node_name: "{{ hostvars[service_node].container_host }}"
+      register: _result_netinfo
+      delegate_to: "{{ kubeinit_deployment_node_name }}"
+      when: hostvars[kubeinit_deployment_node_name].podman_is_installed is defined and hostvars[kubeinit_deployment_node_name].podman_is_installed
+
+    - name: Set facts about those pod networks
+      ansible.builtin.set_fact:
+        orphaned_pod_nets: "{{ (orphaned_pod_nets | default([])) + ([service_node] | product(nets)) }}"
+      loop: "{{ _result_netinfo.results }}"
+      loop_control:
+        loop_var: net_info_result
+      vars:
+        kubeinit_deployment_node_name: "{{ hostvars[net_info_result.service_node].container_host }}"
+        service_node: "{{ net_info_result.service_node }}"
+        nets: "{{ net_info_result.networks }}"
+      when: hostvars[kubeinit_deployment_node_name].podman_is_installed is defined and hostvars[kubeinit_deployment_node_name].podman_is_installed
+
+    - debug: var=item
+      loop: "{{ orphaned_pod_nets | default([]) | list }}"
+
+    - fail: msg=stopping
+
+    - name: Set facts about pod networks for this cluster
+      ansible.builtin.set_fact:
+        orphaned_cluster_pod_nets: "{{ (orphaned_cluster_pod_nets | default([])) + ([service_node] | product([network])) }}"
+      loop: "{{ orphaned_pod_nets | default([]) | list }}"
+      loop_control:
+        loop_var: orphaned_pod_net
+      vars:
+        service_node: "{{ orphaned_pod_net[0] }}"
+        bridge_name: "{{ hostvars[orphaned_pod_net[0]].guest_name }}-bridge"
+        network: "{{ orphaned_pod_net[1] }}"
+      when: bridge_name == network.name
+
+    ##
+    ## Clean service nodes
+    ##
+    - name: Stop and disable user services
+      ansible.builtin.service:
+        name: "{{ service_name }}"
+        scope: user
+        state: stopped
+        enabled: false
+      register: _result_stop_service
+      failed_when: _result_stop_service is not defined
+      loop: "{{ groups['hypervisor_hosts'] | product(hostvars['kubeinit-cluster'].services) }}"
+      vars:
+        kubeinit_deployment_node_name: "{{ item[0] }}"
+        service_name: "{{ kubeinit_cluster_name }}-{{ item[1] }}"
+      delegate_to: "{{ kubeinit_deployment_node_name }}"
+      when: false
+
+    - name: Remove any previous services podman pods
+      containers.podman.podman_pod:
+        name: "{{ pod.Name }}"
+        state: absent
+      loop: "{{ orphaned_cluster_pods }}"
+      loop_control:
+        loop_var: orphaned_cluster_pod
+      vars:
+        service_node: "{{ orphaned_cluster_pod[0] }}"
+        pod: "{{ orphaned_cluster_pod[1] }}"
+      delegate_to: "{{ hostvars[service_node].target }}"
+      when: orphaned_cluster_pods is defined
+
+    - name: Remove any previous kubeinit podman network
+      containers.podman.podman_network:
+        name: "{{ network.name }}"
+        state: absent
+      loop: "{{ orphaned_cluster_pod_nets }}"
+      loop_control:
+        loop_var: orphaned_cluster_pod_net
+      vars:
+        service_node: "{{ orphaned_cluster_pod_net[0] }}"
+        network: "{{ orphaned_cluster_pod_net[1] }}"
+      delegate_to: "{{ hostvars[service_node].target }}"
+      when: orphaned_cluster_pod_nets is defined
+
+    - name: Remove netns for cluster pods
+      community.general.ip_netns:
+        name: "{{ sandbox_key }}"
+        state: absent
+      loop: "{{ infra_container_sandbox_keys }}"
+      loop_control:
+        loop_var: infra_container_sandbox_key
+      vars:
+        service_node: "{{ infra_container_sandbox_key[0] }}"
+        sandbox_key: "{{ infra_container_sandbox_key[1] }}"
+      delegate_to: "{{ hostvars[service_node].target }}"
+      when: infra_container_sandbox_keys is defined
+
+    - name: Find any podman volumes from previous deployments
+      containers.podman.podman_volume_info:
+      loop: "{{ groups['service_nodes'] }}"
+      loop_control:
+        loop_var: service_node
+      vars:
+        kubeinit_deployment_node_name: "{{ hostvars[service_node].container_host }}"
+      register: _result_volinfo
+      delegate_to: "{{ kubeinit_deployment_node_name }}"
+      when: hostvars[kubeinit_deployment_node_name].podman_is_installed is defined and hostvars[kubeinit_deployment_node_name].podman_is_installed
+
+    - name: Set facts about those podman volumes
+      ansible.builtin.set_fact:
+        orphaned_pod_vols: "{{ (orphaned_pod_vols | default([])) + ([service_node] | product(vols)) }}"
+      loop: "{{ _result_volinfo.results }}"
+      loop_control:
+        loop_var: vol_info_result
+      vars:
+        kubeinit_deployment_node_name: "{{ hostvars[vol_info_result.service_node].container_host }}"
+        service_node: "{{ vol_info_result.service_node }}"
+        vols: "{{ vol_info_result.volumes | default([]) }}"
+      when: hostvars[kubeinit_deployment_node_name].podman_is_installed is defined and hostvars[kubeinit_deployment_node_name].podman_is_installed
+
+    - name: Set facts about podman volumes for this cluster
+      ansible.builtin.set_fact:
+        orphaned_cluster_pod_vols: "{{ (orphaned_cluster_pod_vols | default([])) + ([service_node] | product([volume])) }}"
+      loop: "{{ orphaned_pod_vols | default([]) | list }}"
+      loop_control:
+        loop_var: orphaned_pod_vol
+      vars:
+        service_node: "{{ orphaned_pod_vol[0] }}"
+        volume: "{{ orphaned_pod_vol[1] }}"
+        cluster_pattern: "{{ kubeinit_cluster_name }}-.*"
+      when: volume.Name is match(cluster_pattern)
+
+    - name: Remove any previous kubeinit podman volumes
+      containers.podman.podman_volume:
+        name: "{{ volume.Name }}"
+        state: absent
+      loop: "{{ orphaned_cluster_pod_vols }}"
+      loop_control:
+        loop_var: orphaned_cluster_pod_vol
+      vars:
+        service_node: "{{ orphaned_cluster_pod_vol[0] }}"
+        volume: "{{ orphaned_cluster_pod_vol[1] }}"
+      delegate_to: "{{ hostvars[service_node].target }}"
+      when: orphaned_cluster_pod_vols is defined
+
+    - name: Remove any previous kubeinit buildah containers
+      ansible.builtin.shell: |
+        set -eo pipefail
+        buildah rm --all || true
+      args:
+        executable: /bin/bash
+      loop: "{{ groups['hypervisor_hosts'] }}"
+      loop_control:
+        loop_var: kubeinit_deployment_node_name
+      register: _result
+      changed_when: "_result.rc == 0"
+      delegate_to: "{{ kubeinit_deployment_node_name }}"
+
+    - name: Prune container images created for the cluster
+      ansible.builtin.shell: |
+        set -eo pipefail
+        podman image prune --filter label=kubeinit-cluster-name={{ kubeinit_cluster_name }} --all --force || true
+      args:
+        executable: /bin/bash
+      loop: "{{ groups['hypervisor_hosts'] }}"
+      loop_control:
+        loop_var: kubeinit_deployment_node_name
+      register: _result
+      changed_when: "_result.rc == 0"
+      delegate_to: "{{ kubeinit_deployment_node_name }}"
+
+    - name: Remove any previous veth dev
+      ansible.builtin.shell: |
+        set -eo pipefail
+        ip link del {{ ovs_veth_devname }} || true
+      args:
+        executable: /bin/bash
+      loop: "{{ groups['hypervisor_hosts'] | product(groups['service_nodes']) }}"
+      vars:
+        kubeinit_deployment_node_name: "{{ item[0] }}"
+        ovs_veth_devname: "veth0-{{ hostvars[item[1]].ansible_host | ansible.utils.ip4_hex }}"
+      register: _result
+      changed_when: "_result.rc == 0"
+      delegate_to: "{{ kubeinit_deployment_node_name }}"
+
+    - name: Remove any previous cluster network endpoint from the openvswitch bridge
+      ansible.builtin.shell: |
+        set -eo pipefail
+        /usr/bin/ovs-vsctl del-port br-int {{ ovs_veth_devname }} || true
+      args:
+        executable: /bin/bash
+      loop: "{{ groups['hypervisor_hosts'] | product(groups['service_nodes']) }}"
+      vars:
+        kubeinit_deployment_node_name: "{{ item[0] }}"
+        ovs_veth_devname: "veth0-{{ hostvars[item[1]].ansible_host | ansible.utils.ip4_hex }}"
+      register: _result
+      changed_when: "_result.rc == 0"
+      delegate_to: "{{ kubeinit_deployment_node_name }}"
+
+    - name: Cleanup the OVN network and other libvirt resources -- hosts, networks, vms, storage
+      ansible.builtin.include_role:
+        name: kubeinit.kubeinit.kubeinit_libvirt
+        tasks_from: cleanup_libvirt.yml
+        public: true
+
+    - name: Remove any existing ssh tunnels on bastion host
+      ansible.builtin.shell: |
+        set -eo pipefail
+        hosts=$(for file in ~/.ssh/cm-root*; do echo $file; done | sed -n -e 's;.*@\(.*\):22;\1;p')
+        for host in $hosts; do ssh -O exit -S "~/.ssh/cm-%r@%h:%p" $host || true; done
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+      delegate_to: "{{ kubeinit_bastion_host }}"
+
+    - name: Get list of existing remote system connection definitions
+      ansible.builtin.shell: |
+        set -eo pipefail
+        podman --remote system connection list | sed -e 1d -e 's/[* ].*//'
+      args:
+        executable: /bin/bash
+      register: _result_connections
+      changed_when: "_result_connections.rc == 0"
+
+    - name: Remove any existing remote system connection definition for bastion hypervisor
+      ansible.builtin.command: |
+        podman --remote system connection remove {{ item }}
+      loop: "{{ _result_connections.stdout_lines | list }}"
+      register: _result
+      changed_when: "_result.rc == 0"
+      when: item in groups['hypervisor_hosts']
+
+    - name: Get list of existing remote system connection definitions
+      ansible.builtin.shell: |
+        set -eo pipefail
+        podman --remote system connection list | sed -e 1d -e 's/[* ].*//'
+      args:
+        executable: /bin/bash
+      register: _result
+      changed_when: "_result.rc == 0"
+
+    - name: Collect all of the host aliases
+      ansible.builtin.set_fact:
+        all_host_aliases: "{{ (all_host_aliases | default([])) + item }}"
+      loop: "{{ groups['hypervisor_hosts'] | zip(groups['hypervisor_hosts'] | map('extract', hostvars, 'ansible_host'), groups['hypervisor_hosts'] | map('extract', hostvars, 'ssh_connection_address')) }}"
+
+    - name: Remove hypervisors from known hosts list
+      ansible.builtin.known_hosts:
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ all_host_aliases }}"
+
+- name: Stop the deployment if requested
+  hosts: kubeinit-facts
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Include hosts and stop the deployment if required
+      block:
+        - name: Add task-cleanup-hypervisors to tasks_completed
+          ansible.builtin.set_fact:
+            tasks_completed: "{{ hostvars['kubeinit-facts'].tasks_completed | union(['task-cleanup-hypervisors']) }}"
+          delegate_to: 'kubeinit-facts'
+          delegate_facts: true
+
+        - name: Stop the deployment if requested
+          ansible.builtin.assert:
+            msg: 'Stopping after task-cleanup-hypervisors'
+            that: (kubeinit_stop_after_task | default('')) not in hostvars['kubeinit-facts'].tasks_completed
+      tags: omit_from_grapher
+
+    - debug: var=hostvars
+
+    - fail: msg=stopping

@@ -21,11 +21,11 @@
 
 - name: Show ansible_distribution
   ansible.builtin.debug:
-    var: hostvars[kubeinit_deployment_node_name].ansible_distribution
+    var: hostvars[inventory_hostname].ansible_distribution
 
 - name: Show distribution_family
   ansible.builtin.debug:
-    var: hostvars[kubeinit_deployment_node_name].distribution_family
+    var: hostvars[inventory_hostname].distribution_family
 
 - name: Fails if CentOS 7 hypervisor
   ansible.builtin.fail:
@@ -37,7 +37,7 @@
       - "Xfs file system in CentOS 8 uses reflink and sparse files,"
       - "but CentOS 7 kernel does not understand them and refuses to mount it."
       - "This means that CentOS 8 guests won't work with CentOS 8 hosts."
-  when: (hostvars[kubeinit_deployment_node_name].ansible_distribution == 'CentOS' and hostvars[kubeinit_deployment_node_name].ansible_distribution_major_version == "7")
+  when: (hostvars[inventory_hostname].ansible_distribution == 'CentOS' and hostvars[inventory_hostname].ansible_distribution_major_version == "7")
 
 - name: Fix libvirt qemu bug
   block:
@@ -59,7 +59,7 @@
     name: "{{ kubeinit_libvirt_hypervisor_dependencies.centos }}"
     state: present
     use: "{{ hostvars[inventory_hostname]['ansible_facts']['pkg_mgr'] }}"
-  when: hostvars[kubeinit_deployment_node_name].distribution_family == 'CentOS' or hostvars[kubeinit_deployment_node_name].distribution_family == 'Fedora'
+  when: hostvars[inventory_hostname].distribution_family == 'CentOS' or hostvars[inventory_hostname].distribution_family == 'Fedora'
   register: _result_installed_packages_centos
 
 #
@@ -71,11 +71,11 @@
 #    state: present
 #    path: "/etc/apt/sources.list"
 #    line: "deb http://http.us.debian.org/debian/ testing non-free contrib main"
-#  when: hostvars[kubeinit_deployment_node_name].os == 'debian'
+#  when: hostvars[inventory_hostname].os == 'debian'
 #
 #- name: Update packages list
 #  ansible.builtin.command: apt-get update
-#  when: hostvars[kubeinit_deployment_node_name].os == 'debian'
+#  when: hostvars[inventory_hostname].os == 'debian'
 #  changed_when: false
 #
 #
@@ -87,7 +87,7 @@
     name: "{{ kubeinit_libvirt_hypervisor_dependencies.debian }}"
     state: present
     use: "{{ hostvars[inventory_hostname]['ansible_facts']['pkg_mgr'] }}"
-  when: hostvars[kubeinit_deployment_node_name].distribution_family == 'Debian'
+  when: hostvars[inventory_hostname].distribution_family == 'Debian'
   register: _result_installed_packages_debian
 
 - name: Add users to libvirt
@@ -123,6 +123,7 @@
   register: _result_intel_processor
   changed_when: "_result_intel_processor.rc == 0"
   failed_when: _result_intel_processor is not defined
+  no_log: true
 
 - name: Check if AMD virtualization is supported
   ansible.builtin.shell: |
@@ -133,6 +134,7 @@
   register: _result_amd_processor
   changed_when: "_result_amd_processor.rc == 0"
   failed_when: _result_amd_processor is not defined
+  no_log: true
 
 - name: Fail in case no Intel or AMD virtualization support is not detected and is not a hosted deployment.
   ansible.builtin.fail:
@@ -189,6 +191,7 @@
   ansible.builtin.set_fact:
     _result_intel_processor: null
     _result_amd_processor: null
+    _result: null
 
 - name: Enable and start libvirtd
   ansible.builtin.service:

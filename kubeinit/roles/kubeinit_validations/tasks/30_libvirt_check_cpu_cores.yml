@@ -26,7 +26,7 @@
   args:
     executable: /bin/bash
   register: _result_total_cores
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   delegate_to: "{{ item }}"
   changed_when: "_result_total_cores.rc == 0"
 
@@ -46,7 +46,7 @@
 - name: Get the total inventory cores usage
   ansible.builtin.set_fact:
     kubeinit_validations_libvirt_cores_usage: "{{ kubeinit_validations_libvirt_cores_usage|default({})| combine( {item: {'id': item, 'vcpus': hostvars[item].vcpus|int, 'target': hostvars[item].target} } ) }}"
-  loop: "{{ groups['all_guest_vms'] }}"
+  loop: "{{ all_guest_vms }}"
 
 - name: Debug
   ansible.builtin.debug:

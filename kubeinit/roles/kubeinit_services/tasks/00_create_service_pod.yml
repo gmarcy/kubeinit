@@ -82,8 +82,7 @@
       when: hostvars[kubeinit_bastion_host].firewalld_is_active
 
     - name: Check firewalld ports for existing entries
-      ansible.builtin.add_host:
-        name: "{{ kubeinit_bastion_host }}"
+      ansible.builtin.set_fact:
         add_bastion_ssh_tunnel: "{{ true if (['6222', 'tcp'] not in default_zone_info.ports) else false }}"
         reload_firewalld: "{{ true if (['6222', 'tcp'] not in default_zone_info.ports) else false }}"
       vars:

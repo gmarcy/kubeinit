@@ -21,23 +21,18 @@
         name: kubeinit.kubeinit.kubeinit_prepare
         public: true
       vars:
-        environment_prepared: "{{ 'kubeinit_facts' in groups }}"
+        environment_prepared: "{{ 'hypervisor_hosts' in groups }}"
       when: not environment_prepared
 
-    - name: Stop the deployment if required
-      block:
-        - name: "Stop before 'task-create-services' when requested"
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_before_task is defined and kubeinit_stop_before_task == 'task-create-services'
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping before task-create-services'
+        that: (kubeinit_stop_before_task | default('')) != 'task-create-services'
   tags: omit_from_grapher
 
 - name: Setup the services pod
   ansible.builtin.include_tasks: 00_create_service_pod.yml
-  loop: "{{ groups['all_service_nodes'] }}"
+  loop: "{{ groups['service_nodes'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   vars:
@@ -54,7 +49,7 @@
 
 - name: Start services containers
   ansible.builtin.include_tasks: start_services_containers.yml
-  loop: "{{ groups['all_service_nodes'] }}"
+  loop: "{{ groups['service_nodes'] }}"
   loop_control:
     loop_var: kubeinit_deployment_node_name
   vars:
@@ -64,21 +59,13 @@
 - name: Gather hosts facts and stop the deployment if required
   block:
     - name: Add task-create-services to tasks_completed
-      ansible.builtin.add_host:
-        name: "kubeinit-facts"
-        tasks_completed: "{{ kubeinit_facts_hostvars.tasks_completed | union(['task-create-services']) }}"
-
-    - name: Update kubeinit_facts_hostvars
       ansible.builtin.set_fact:
-        kubeinit_facts_hostvars: "{{ hostvars['kubeinit-facts'] }}"
+        tasks_completed: "{{ hostvars['kubeinit-facts'].tasks_completed | union(['task-create-services']) }}"
+      delegate_to: "kubeinit-facts"
+      delegate_facts: true
 
-    - name: Stop the deployment if required
-      block:
-        - name: Stop after 'task-create-services' when requested
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_after_task is defined and kubeinit_stop_after_task in kubeinit_facts_hostvars.tasks_completed
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping after task-create-services'
+        that: (kubeinit_stop_after_task | default('')) not in hostvars['kubeinit-facts'].tasks_completed
   tags: omit_from_grapher

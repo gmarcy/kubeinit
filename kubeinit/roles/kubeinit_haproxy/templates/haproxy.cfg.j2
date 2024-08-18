@@ -56,10 +56,10 @@ frontend kube_api_fe
 backend kube_api_be
     balance source
     mode tcp
-{% for host in groups['all_extra_nodes'] | default([]) | list %}
+{% for host in groups['extra_nodes'] | default([]) | list %}
     server      {{ host }} {{ hostvars[host].ansible_host }}:6443 check
 {% endfor %}
-{% for host in groups['all_controller_nodes'] | list %}
+{% for host in groups['controller_nodes'] | list %}
     server      {{ host }} {{ hostvars[host].ansible_host }}:6443 check
 {% endfor %}
 
@@ -72,10 +72,10 @@ frontend machine_config_server_fe
 backend machine_config_server_be
     balance source
     mode tcp
-{% for host in groups['all_extra_nodes'] | default([]) | list %}
+{% for host in groups['extra_nodes'] | default([]) | list %}
     server      {{ host }} {{ hostvars[host].ansible_host }}:22623 check
 {% endfor %}
-{% for host in groups['all_controller_nodes'] | list %}
+{% for host in groups['controller_nodes'] | list %}
     server      {{ host }} {{ hostvars[host].ansible_host }}:22623 check
 {% endfor %}
 
@@ -88,10 +88,10 @@ frontend http_ingress_traffic_fe
 backend http_ingress_traffic_be
     balance source
     mode tcp
-{% for host in groups['all_compute_nodes'] | default([]) | list %}
+{% for host in groups['compute_nodes'] | default([]) | list %}
     server      {{ host }} {{ hostvars[host].ansible_host }}:80 check
 {% endfor %}
-{% for host in groups['all_controller_nodes'] | list %}
+{% for host in groups['controller_nodes'] | list %}
 {% if not kubeinit_compute_count|int > 0 %}
     server      {{ host }} {{ hostvars[host].ansible_host }}:80 check
 {% endif %}
@@ -106,10 +106,10 @@ frontend https_ingress_traffic_fe
 backend https_ingress_traffic_be
     balance source
     mode tcp
-{% for host in groups['all_compute_nodes'] | default([]) | list %}
+{% for host in groups['compute_nodes'] | default([]) | list %}
     server      {{ host }} {{ hostvars[host].ansible_host }}:443 check
 {% endfor %}
-{% for host in groups['all_controller_nodes'] | list %}
+{% for host in groups['controller_nodes'] | list %}
 {% if not kubeinit_compute_count|int > 0 %}
     server      {{ host }} {{ hostvars[host].ansible_host }}:443 check
 {% endif %}

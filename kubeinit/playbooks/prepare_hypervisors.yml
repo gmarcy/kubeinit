@@ -1,0 +1,81 @@
+---
+# Copyright kubeinit contributors
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+- name: Prepare all hypervisor hosts
+  hosts: kubeinit-facts
+  become: false
+  gather_facts: false
+  tasks:
+    - name: task-prepare-hypervisors
+      tags: task_prepare_hypervisors
+      block:
+        - name: Gather hosts facts and stop the deployment if required
+          block:
+            - name: Gather kubeinit facts if needed
+              ansible.builtin.include_tasks: gather_kubeinit_facts.yml
+              vars:
+                facts_prepared: "{{ 'hypervisor_hosts' in groups }}"
+              when: not facts_prepared
+
+            - name: Stop the deployment if requested
+              ansible.builtin.assert:
+                msg: 'Stopping before task-prepare-hypervisors'
+                that: (kubeinit_stop_before_task | default('')) != 'task-prepare-hypervisors'
+          tags: omit_from_grapher
+
+- name: Prepare the infrastructure to deploy service and cluster nodes
+  hosts: "{{ hostvars['kubeinit-facts'].all_hosts }}"
+  gather_facts: false
+  tasks:
+    - name: Generate an OpenSSH keypair
+      community.crypto.openssh_keypair:
+        path: "~/.ssh/{{ hostvars['kubeinit-facts'].cluster_name }}_id_{{ hostvars['kubeinit-facts'].ssh_keytype }}"
+        type: "{{ hostvars['kubeinit-facts'].ssh_keytype }}"
+        comment: "{{ hostvars['kubeinit-facts'].cluster_name + ' ' + inventory_hostname }}"
+        regenerate: 'never'
+      register: _result_keypair
+
+    - name: Create authorized_key from keypair
+      ansible.builtin.set_fact:
+        authorized_key: "{{ _result_keypair.public_key + ' ' + _result_keypair.comment }}"
+      delegate_facts: true
+
+    - name: Clear temp results
+      ansible.builtin.set_fact:
+        _result_keypair: null
+
+    - name: Provision the libvirt services on the hypervisor
+      ansible.builtin.include_role:
+        name: kubeinit.kubeinit.kubeinit_libvirt
+        public: true
+
+    - debug: var=hostvars[inventory_hostname].authorized_key
+
+- name: Complete task-prepare-hypervisors
+  hosts: kubeinit-facts
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Add task-prepare-hypervisors to tasks_completed
+      ansible.builtin.set_fact:
+        tasks_completed: "{{ hostvars['kubeinit-facts'].tasks_completed | union(['task-prepare-hypervisors']) }}"
+      delegate_to: "kubeinit-facts"
+      delegate_facts: true
+
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping after task-prepare-hypervisors'
+        that: (kubeinit_stop_after_task | default('')) not in hostvars['kubeinit-facts'].tasks_completed

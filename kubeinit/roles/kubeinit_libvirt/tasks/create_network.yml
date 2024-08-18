@@ -22,18 +22,13 @@
         tasks_from: cleanup_hypervisors.yml
         public: true
       vars:
-        hypervisors_cleaned: "{{ 'kubeinit_facts' in groups }}"
+        hypervisors_cleaned: "{{ 'hypervisor_hosts' in groups }}"
       when: not hypervisors_cleaned
 
-    - name: Stop the deployment
-      block:
-        - name: "Stop before 'task-create-network' when requested"
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_before_task is defined and kubeinit_stop_before_task == 'task-create-network'
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping before task-create-network'
+        that: (kubeinit_stop_before_task | default('')) != 'task-create-network'
   tags: omit_from_grapher
 
 #
@@ -86,7 +81,7 @@
 - name: Collect all HVs which are not the ovn-central host
   ansible.builtin.set_fact:
     kubeinit_other_ovn_hosts: "{{ (kubeinit_other_ovn_hosts | default([])) + [ovn_host] }}"
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   when: ovn_host not in kubeinit_ovn_central_host
@@ -141,7 +136,7 @@
   ansible.posix.firewalld_info:
     active_zones: true
   register: _result_firewalld_info
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -152,8 +147,7 @@
     rich_rule_result: "rule family=\"ipv4\" source address=\"{{ kubeinit_cluster_network }}\" masquerade"
 
 - name: Check firewalld services and rich_rules for existing entries
-  ansible.builtin.add_host:
-    name: "{{ item.ovn_host }}"
+  ansible.builtin.set_fact:
     add_ovn_rich_rule: "{{ true if (rich_rule_result not in default_zone_info.rich_rules) else false }}"
     add_ovn_central_service: "{{ true if ('ovn-central-firewall-service' not in default_zone_info.services) else false }}"
     add_ovn_host_service: "{{ true if ('ovn-host-firewall-service' not in default_zone_info.services) else false }}"
@@ -161,6 +155,8 @@
   loop: "{{ _result_firewalld_info.results }}"
   vars:
     default_zone_info: "{{ item.firewalld_info.zones[item.firewalld_info.default_zone] }}"
+  delegate_to: "{{ item.ovn_host }}"
+  delegate_facts: true
   when: item.firewalld_info is defined
 
 - name: Refresh firewalld services list to pick up ovn services
@@ -168,7 +164,7 @@
     firewall-cmd --reload
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -198,7 +194,7 @@
     permanent: true
     state: enabled
     immediate: true
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -209,7 +205,7 @@
     firewall-cmd --reload
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -220,7 +216,7 @@
     podman network reload --all
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -313,7 +309,7 @@
     executable: /bin/bash
   register: _result
   changed_when: "_result.rc == 0"
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -384,7 +380,7 @@
         /usr/bin/ovn-nbctl --wait=sb --wait=sb --timeout=30 lsp-set-port-security {{ hostvars[item].interfaceid }} "{{ hostvars[item].mac }} {{ hostvars[item].ansible_host }}"
       args:
         executable: /bin/bash
-      loop: "{{ groups['all_nodes'] }}"
+      loop: "{{ hostvars['kubeinit-cluster'].all_nodes }}"
       register: _result
       changed_when: "_result.rc == 0"
 
@@ -523,7 +519,7 @@
     src: cluster-net.xml.j2
     dest: "{{ kubeinit_libvirt_hypervisor_tmp_dir }}/cluster-net.xml"
     mode: '0644'
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -533,7 +529,7 @@
     command: define
     name: "{{ kubeinit_cluster_network_name }}"
     xml: '{{ lookup("template", "cluster-net.xml.j2") }}'
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -542,7 +538,7 @@
   community.libvirt.virt_net:
     state: active
     name: "{{ kubeinit_cluster_network_name }}"
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -551,7 +547,7 @@
   community.libvirt.virt_net:
     autostart: yes
     name: "{{ kubeinit_cluster_network_name }}"
-  loop: "{{ groups['all_ovn_hosts'] }}"
+  loop: "{{ groups['hypervisor_hosts'] }}"
   loop_control:
     loop_var: ovn_host
   delegate_to: "{{ ovn_host }}"
@@ -577,21 +573,13 @@
 - name: Add hosts and stop if required
   block:
     - name: Add task-create-network to tasks_completed
-      ansible.builtin.add_host:
-        name: "kubeinit-facts"
-        tasks_completed: "{{ kubeinit_facts_hostvars.tasks_completed | union(['task-create-network']) }}"
-
-    - name: Update kubeinit_facts_hostvars
       ansible.builtin.set_fact:
-        kubeinit_facts_hostvars: "{{ hostvars['kubeinit-facts'] }}"
+        tasks_completed: "{{ hostvars['kubeinit-facts'].tasks_completed | union(['task-create-network']) }}"
+      delegate_to: 'kubeinit-facts'
+      delegate_facts: true
 
-    - name: Stop the deployment if required
-      block:
-        - name: Stop after 'task-create-network' when requested
-          ansible.builtin.add_host:
-            name: "kubeinit-facts"
-            playbook_terminated: true
-        - name: End play
-          ansible.builtin.meta: end_play
-      when: kubeinit_stop_after_task is defined and kubeinit_stop_after_task in kubeinit_facts_hostvars.tasks_completed
+    - name: Stop the deployment if requested
+      ansible.builtin.assert:
+        msg: 'Stopping after task-create-network'
+        that: (kubeinit_stop_after_task | default('')) not in hostvars['kubeinit-facts'].tasks_completed
   tags: omit_from_grapher
