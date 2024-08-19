@@ -39,8 +39,8 @@
             tasks_from: build_hypervisors_group.yml
             public: true
 
-- name: Gather facts from the cluster hypervisor hosts
-  hosts: kubeinit_hypervisors
+- name: Gather facts from all cluster hosts
+  hosts: all_hosts
   become: false
   gather_subset: "!all,network"
   gather_facts: false
@@ -95,7 +95,7 @@
             public: true
 
 - name: Prepare the infrastructure to deploy service and cluster nodes
-  hosts: kubeinit_hypervisors
+  hosts: all_hosts
   gather_facts: false
   tasks:
     - name: Skip play if playbook_terminated

@@ -46,10 +46,10 @@
 - name: Install OVN central packages in CentOS/RHEL
   ansible.builtin.shell: |
     dnf install -y centos-release-nfv-openvswitch
-    dnf install -y openvswitch2.16 \
-                   ovn-2021 \
-                   ovn-2021-central \
-                   ovn-2021-host
+    dnf install -y openvswitch3.3 \
+                   ovn24.03 \
+                   ovn24.03-host \
+                   ovn24.03-central
   args:
     executable: /bin/bash
   register: _result
@@ -61,8 +61,8 @@
   ansible.builtin.command: |
     dnf install -y openvswitch \
                    ovn \
-                   ovn-central \
-                   ovn-host
+                   ovn-host \
+                   ovn-central
   register: _result
   changed_when: "_result.rc == 0"
   delegate_to: "{{ kubeinit_ovn_central_host }}"
@@ -94,9 +94,9 @@
 - name: Install OVN host packages in CentOS/RHEL
   ansible.builtin.shell: |
     dnf install -y centos-release-nfv-openvswitch
-    dnf install -y openvswitch2.16 \
-                   ovn-2021 \
-                   ovn-2021-host
+    dnf install -y openvswitch3.3 \
+                   ovn24.03 \
+                   ovn24.03-host
   args:
     executable: /bin/bash
   register: _result
@@ -236,8 +236,8 @@
         enabled: yes
       loop:
         - openvswitch
-        - ovn-northd
         - ovn-controller
+        - ovn-northd
       delegate_to: "{{ kubeinit_ovn_central_host }}"
       when: hostvars[kubeinit_ovn_central_host].distribution_family != 'Debian'
 

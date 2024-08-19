@@ -133,20 +133,11 @@
     os: "{{ hostvars[item].os }}"
   loop: "{{ groups['all_service_nodes'] + groups['all_cluster_nodes'] + (groups['all_extra_nodes'] | default([])) }}"
 
-- name: Add all cluster hypervisors to the all_hosts group
-  ansible.builtin.add_host:
-    name: "{{ item }}"
-    group: all_hosts
-  loop: "{{ groups['kubeinit_hypervisors'] }}"
-  when: >
-    item in hostvars[kubeinit_ovn_central_host_name].target or
-    item in groups['kubeinit_hypervisors']
-
 - name: Add all hosts to the all_ovn_hosts group
   ansible.builtin.add_host:
     name: "{{ item }}"
     group: all_ovn_hosts
-  loop: "{{ groups['all_hosts'] }}"
+  loop: "{{ (groups['kubeinit_hypervisors'] + groups['bastion_host'] + groups['ovn_central_host']) | unique }}"
 
 - name: Collect all of the localhost and hypervisor authorized keys into authorized_keys list
   ansible.builtin.set_fact:

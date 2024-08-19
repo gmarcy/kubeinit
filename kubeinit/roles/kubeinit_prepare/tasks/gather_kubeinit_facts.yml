@@ -247,6 +247,7 @@
     maxvcpus: "{{ _defaults['maxvcpus'] if (_defaults['maxvcpus'] is defined and _group_matches|bool and _type_matches|bool) else omit }}"
     disk: "{{ _defaults['disk'] if (_defaults['disk'] is defined and _group_matches|bool and _type_matches|bool) else omit }}"
     ram: "{{ _defaults['ram'] if (_defaults['ram'] is defined and _group_matches|bool and _type_matches|bool) else omit }}"
+    target: "{{ _defaults['target'] if (_defaults['target'] is defined and _group_matches|bool and _type_matches|bool) else omit }}"
     target_order: "{{ _defaults['target_order'] if (_defaults['target_order'] is defined and _group_matches|bool and _type_matches|bool) else omit }}"
   loop: "{{ cluster_nodes_defaults }}"
   vars:
@@ -273,6 +274,7 @@
     maxvcpus: "{{ _config['maxvcpus'] if (_config['maxvcpus'] is defined and _type_matches|bool) else omit }}"
     disk: "{{ _config['disk'] if (_config['disk'] is defined and _type_matches|bool) else omit }}"
     ram: "{{ _config['ram'] if (_config['ram'] is defined and _type_matches|bool) else omit }}"
+    target: "{{ _config['target'] if (_config['target'] is defined and _type_matches|bool) else omit }}"
     target_order: "{{ _config['target_order'] if (_config['target_order'] is defined and _type_matches|bool) else omit }}"
   loop: "{{ extra_nodes_config }}"
   vars:
@@ -292,6 +294,7 @@
     name: "{{ _host }}"
     os: "{{ _config['os'] if (_config['os'] is defined) else omit }}"
     services: "{{ _config['services'] if (_config['services'] is defined) else omit }}"
+    target: "{{ _config['target'] if (_config['target'] is defined) else omit }}"
     target_order: "{{ _config['target_order'] if (_config['target_order'] is defined) else omit }}"
   loop: "{{ service_nodes_config }}"
   vars:

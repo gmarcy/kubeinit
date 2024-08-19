@@ -122,4 +122,3 @@ default_service_nodes_map_list:
   - ocp
   - okd
   os: "{{ openshift_service_node_os }}"
-- name: service

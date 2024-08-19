@@ -243,16 +243,19 @@
   loop_control:
     loop_var: kubeinit_deployment_node_name
   delegate_to: "{{ kubeinit_deployment_node_name }}"
-  when: hostvars[kubeinit_deployment_node_name].ovs_is_active and kubeinit_destroy_ovn_network
+  when: >
+    kubeinit_destroy_ovn_network and
+    (kubeinit_deployment_node_name in kubeinit_ovn_central_host) and
+    hostvars[kubeinit_deployment_node_name].ovs_is_active
 
-- name: Stop and disable OVN services in the first hypervisor (CentOS based)
+- name: Stop and disable OVN services in the ovn-central hypervisor (CentOS based)
   ansible.builtin.service:
     name: "{{ service_name }}"
     state: stopped
     enabled: false
   register: _result_stop_service
   failed_when: _result_stop_service is not defined
-  loop: "{{ groups['all_hosts'] | product(['openvswitch', 'ovn-northd', 'ovn-controller']) }}"
+  loop: "{{ groups['all_hosts'] | product(['openvswitch', 'ovn-controller', 'ovn-northd']) }}"
   vars:
     kubeinit_deployment_node_name: "{{ item[0] }}"
     service_name: "{{ item[1] }}"
@@ -279,7 +282,7 @@
     (kubeinit_deployment_node_name not in kubeinit_ovn_central_host) and
     (hostvars[kubeinit_deployment_node_name].distribution_family == 'CentOS' or hostvars[kubeinit_deployment_node_name].distribution_family == 'Fedora')
 
-- name: Stop and disable OVN services in the first hypervisor (Ubuntu based)
+- name: Stop and disable OVN services in the ovn-central hypervisor (Ubuntu based)
   ansible.builtin.service:
     name: "{{ service_name }}"
     state: stopped
