@@ -386,7 +386,7 @@
 
 - name: Update hosts and stop the deployment if required
   block:
-    - name: Add tasks-gather-facts to tasks completed
+    - name: Add task-gather-facts to tasks completed
       ansible.builtin.add_host:
         name: "kubeinit-facts"
         tasks_completed: "{{ ['task-gather-facts'] }}"
